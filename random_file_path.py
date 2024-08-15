@@ -1,5 +1,8 @@
 import os
 import random
+import torch
+from PIL import Image, ImageOps, ImageSequence
+import numpy as np
 
 class RandomFilePathNode:
     def __init__(self):
@@ -29,10 +32,59 @@ class RandomFilePathNode:
         random_file = random.choice(files)
         return (random_file,)
 
+
+class RandomImagePathNode:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "directory_path": ("STRING", {"default":""}),
+                "index": ("INT", {"default":0}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE","STRING")
+    FUNCTION = "get_random_image_path"
+    CATEGORY = "Utility/Files"
+
+    def get_random_image_path(self, directory_path, index) -> str:
+        if not os.path.isdir(directory_path):
+            raise NotADirectoryError(f"'{directory_path}' is not a valid directory path.")
+
+        # Filter only image files
+        valid_extensions = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
+        files = []
+        
+        # Walk through the directory tree
+        for root, dirs, files_in_dir in os.walk(directory_path):
+            for file_name in files_in_dir:
+                # Build full path to the file
+                full_file_path = os.path.join(root, file_name)
+                # Check if the file has a valid extension
+                if file_name.lower().endswith(valid_extensions):
+                    files.append(full_file_path)
+
+        if not files:
+            raise FileNotFoundError(f"No image files found in directory: {directory_path}")
+
+        random_file = files[index]
+        image = Image.open(random_file)
+        image = ImageOps.exif_transpose(image)
+        image = image.convert("RGB")
+        image = np.array(image).astype(np.float32) / 255.0
+        image = torch.from_numpy(image)[None,]
+
+        return ( image, random_file)
+
 NODE_CLASS_MAPPINGS = {
+    "RandomImagePathNode": RandomImagePathNode,
     "RandomFilePathNode": RandomFilePathNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "RandomImagePathNode": "🎲 Random Image Path",
     "RandomFilePathNode": "🎲 Random File Path",
 }
