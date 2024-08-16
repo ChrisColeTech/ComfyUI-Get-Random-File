@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-get-random-file"
-description = ""
+description = "🚀 Picks a random IMAGE file from a directory and provides you with the IMAGE and its filepath as a STRING. This awesome tool brings a touch of randomness to your files and images, making your file management tasks a breeze."
 version = "1.0.0"
 license = {file = "LICENSE"}
 
@@ -9,6 +9,6 @@ Repository = "https://github.com/ChrisColeTech/ComfyUI-Get-Random-File"
 #  Used by Comfy Registry https://comfyregistry.org
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "chriscoletech"
 DisplayName = "ComfyUI-Get-Random-File"
-Icon = ""
+Icon = "🎲"
