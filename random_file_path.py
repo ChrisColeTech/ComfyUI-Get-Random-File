@@ -1,10 +1,10 @@
 import os
 import random
 import torch
-import torch.nn.functional as F
 from PIL import Image, ImageOps
-from torchvision import models, transforms
 import numpy as np
+import cv2
+from .logger import *
 
 class RandomFilePathNode:
     def __init__(self):
@@ -48,17 +48,7 @@ class RandomFilePathNode:
 
 class RandomImagePathNode:
     def __init__(self):
-        # Load a pre-trained ResNet model
-        self.model = models.resnet50(pretrained=True)
-        self.model.eval()  # Set the model to evaluation mode
-
-        # Define the image transformation
-        self.preprocess = transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+        pass
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -105,10 +95,7 @@ class RandomImagePathNode:
         image = image.convert("RGB")
         image = np.array(image).astype(np.float32) / 255.0
         image = torch.from_numpy(image)[None,]
-       
-        latents = image.permute(0, 3, 1, 2)
-        latents = F.interpolate(latents, size=((image.shape[1] // 8), (image.shape[2] // 8)))
-        
+
 
         return (image, path)
         
@@ -160,16 +147,168 @@ class GetImageFileByIndexNode:
         image = torch.from_numpy(image)[None,]
 
         return ( image, path)
+    
+video_extensions = ('webm', 'mp4', 'mkv', 'gif')
+        
+class RandomVideoPathNode:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "directory_path": ("STRING", {"default": ""}),
+            },
+        }
+    
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("NaN")
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("images", "STRING")
+
+    FUNCTION = "get_random_video_path"
+    CATEGORY = "Utility/Files"
+
+
+
+    def get_random_video_path(self, directory_path) -> tuple:
+        if not os.path.isdir(directory_path):
+            raise NotADirectoryError(f"'{directory_path}' is not a valid directory path.")
+
+        # Filter only video files
+        
+      
+        files = []
+
+        # Walk through the directory tree
+        for root, dirs, files_in_dir in os.walk(directory_path):
+            for file_name in files_in_dir:
+                # Build full path to the file
+                full_file_path = os.path.join(root, file_name)
+                # Check if the file has a valid extension
+                if file_name.lower().endswith(video_extensions):
+                    files.append(full_file_path)
+
+        if not files:
+            raise FileNotFoundError(f"No image files found in directory: {directory_path}")
+
+        # Select a random image path
+        path = random.choice(files)
+        images = FrameGenerator(path)
+      
+        return (images, path)
+    
+def get_video_frames(video_path):
+    video_cap = cv2.VideoCapture(video_path)
+    
+    if not video_cap.isOpened():
+        raise ValueError(f"Could not open video file: {video_path}")
+    
+    frames = []
+    while True:
+        ret, frame = video_cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+    
+    video_cap.release()
+    return frames
+
+class FrameGenerator:
+    def __init__(self, video_path):
+        self.video_path = video_path
+        self.frames = self._load_frames()
+
+    def _load_frames(self):
+        video_cap = cv2.VideoCapture(self.video_path)
+        if not video_cap.isOpened():
+            raise ValueError(f"Could not open video file: {self.video_path}")
+        
+        frames = []
+        while True:
+            ret, frame = video_cap.read()
+            if not ret:
+                break
+            
+            # Convert frame from BGR to RGB
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Convert frame to a torch tensor and normalize it
+            frame_tensor = torch.from_numpy(frame).float() / 255.0
+
+            frames.append(frame_tensor)
+        
+        video_cap.release()
+        return frames
+
+    def __len__(self):
+        return len(self.frames)
+
+    def __getitem__(self, index):
+        return self.frames[index]
+
+    def __iter__(self):
+        return iter(self.frames)
+
+class GetVideoFileByIndexNode:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "directory_path": ("STRING", {"default":""}),
+                "index": ("INT", {"default":0}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("images", "STRING")
+    FUNCTION = "get_video_path_by_index"
+    CATEGORY = "Utility/Files"
+
+    def get_video_path_by_index(self, directory_path, index) -> str:
+        if not os.path.isdir(directory_path):
+            raise NotADirectoryError(f"'{directory_path}' is not a valid directory path.")
+
+        # Filter only image files
+        files = []
+        
+        # Walk through the directory tree
+        for root, dirs, files_in_dir in os.walk(directory_path):
+            for file_name in files_in_dir:
+                # Build full path to the file
+                full_file_path = os.path.join(root, file_name)
+                # Check if the file has a valid extension
+                if file_name.lower().endswith(video_extensions):
+                    files.append(full_file_path)
+
+        if not files:
+            raise FileNotFoundError(f"No image files found in directory: {directory_path}")
+
+        path = files[index]
+        images = FrameGenerator(path)
+
+        return ( images, path)
         
 
+
 NODE_CLASS_MAPPINGS = {
+    "RandomVideoPathNode": RandomVideoPathNode,
     "RandomImagePathNode": RandomImagePathNode,
     "RandomFilePathNode": RandomFilePathNode,
     "GetImageFileByIndexNode": GetImageFileByIndexNode,
+    "GetVideoFileByIndexNode": GetVideoFileByIndexNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "RandomVideoPathNode": "🎲 Random Video Path",
     "RandomImagePathNode": "🎲 Random Image Path",
     "RandomFilePathNode": "🎲 Random File Path",
     "GetImageFileByIndexNode": "🖼️ Get Image File By Index",
+    "GetVideoFileByIndexNode": "▶️ Get Video File By Index",
 }
