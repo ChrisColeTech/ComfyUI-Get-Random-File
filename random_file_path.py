@@ -18,7 +18,7 @@ class RandomFilePathNode:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "get_random_file_path"
-    CATEGORY = "Utility/Files"
+    CATEGORY = "CCTech/Files"
 
     def get_random_file_path(self, directory_path: str) -> str:
         if not os.path.isdir(directory_path):
@@ -47,7 +47,7 @@ class RandomImagePathNode:
 
     RETURN_TYPES = ("IMAGE","STRING")
     FUNCTION = "get_random_image_path"
-    CATEGORY = "Utility/Files"
+    CATEGORY = "CCTech/Files"
 
     def get_random_image_path(self, directory_path) -> str:
         if not os.path.isdir(directory_path):
@@ -97,7 +97,7 @@ class GetImageFileByIndexNode:
 
     RETURN_TYPES = ("IMAGE","STRING")
     FUNCTION = "get_image_path_by_index"
-    CATEGORY = "Utility/Files"
+    CATEGORY = "CCTech/Files"
 
     def get_image_path_by_index(self, directory_path, index) -> str:
         if not os.path.isdir(directory_path):
