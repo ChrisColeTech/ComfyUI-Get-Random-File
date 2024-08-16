@@ -287,7 +287,7 @@ class GetVideoFileByIndexNode:
                     files.append(full_file_path)
 
         if not files:
-            raise FileNotFoundError(f"No image files found in directory: {directory_path}")
+            raise FileNotFoundError(f"No video files found in directory: {directory_path}")
 
         path = files[index]
         images = FrameGenerator(path)
