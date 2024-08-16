@@ -6,18 +6,26 @@ Welcome to **ComfyUI-Get-Random-File**! 🚀 This awesome tool brings a touch of
 
 ## Included Nodes 🌟
 
+
+- 🎲 **Random File Path**  
+  Chooses a random file from a directory and returns the filepath as a STRING. 
+
 - 🖼️ **Get Image File By Index**  
   Retrieves a IMAGE from a specified directory by index and returns both the IMAGE and its filepath as a STRING. 
 
 - 🎲 **Random Image Path**  
   Picks a random IMAGE file from a directory and provides you with the IMAGE and its filepath as a STRING. 
 
-- 🎲 **Random File Path**  
-  Chooses a random file from a directory and returns the filepath as a STRING. 
-
 ## 📸 Preview
 
-![Preview Image](https://github.com/ChrisColeTech/ComfyUI-Get-Random-File/blob/main/preview1.jpg)
+🎲 **Random File Path**  
+ ![Preview Image](https://github.com/ChrisColeTech/ComfyUI-Get-Random-File/blob/main/img/preview3.jpg)
+
+🖼️ **Get Image File By Index**  
+![Preview Image](https://github.com/ChrisColeTech/ComfyUI-Get-Random-File/blob/main/img/preview2.jpg)
+
+🎲 **Random Image Path**  
+![Preview Image](https://github.com/ChrisColeTech/ComfyUI-Get-Random-File/blob/main/img/preview1.jpg)
 
 ## Installation 🛠️
 
