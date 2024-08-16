@@ -1,6 +1,6 @@
 # 🎉 ComfyUI-Get-Random-File 🎉
 
-![Build Status](https://img.shields.io/github/actions/workflow/status/ChrisColeTech/ComfyUI-Get-Random-File/ci.yml?branch=main&label=Build%20Status)
+![Build Status](https://img.shields.io/github/actions/workflow/status/ChrisColeTech/ComfyUI-Get-Random-File/publsh.yml?branch=main&label=Build%20Status)
 
 Welcome to **ComfyUI-Get-Random-File**! 🚀 This awesome tool brings a touch of randomness to your files and images, making your file management tasks a breeze. Whether you're wor king on a creative project or just want some fun, our tool is here to help you get random files and images effortlessly. Use these nodes for a variety of applications where you need a random file!
 
