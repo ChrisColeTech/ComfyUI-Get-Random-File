@@ -17,7 +17,7 @@ Welcome to **ComfyUI-Get-Random-File**! 🚀 This awesome tool brings a touch of
 
 ## 📸 Preview
 
-![Preview Image](https://via.placeholder.com/600x400.png?text=Random+File+Preview)
+![Preview Image](https://github.com/ChrisColeTech/ComfyUI-Get-Random-File/blob/main/preview1.jpg)
 
 ## Installation 🛠️
 
