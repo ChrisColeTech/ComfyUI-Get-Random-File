@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-get-random-file"
 description = "🚀 Picks a random IMAGE file from a directory and provides you with the IMAGE and its filepath as a STRING. This awesome tool brings a touch of randomness to your files and images, making your file management tasks a breeze."
-version = "1.0.7"
+version = "1.0.8"
 license = {file = "LICENSE"}
 
 [project.urls]
