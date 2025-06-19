@@ -21,11 +21,14 @@ Welcome to **ComfyUI-Get-Random-File**! 🚀 This awesome tool brings a touch of
 🎲 **Random File Path**  
  ![Preview Image](https://github.com/ChrisColeTech/ComfyUI-Get-Random-File/blob/main/img/preview3.jpg)
 
-🖼️ **Get Image File By Index**  
+🎲 **Random Image Path**  
 ![Preview Image](https://github.com/ChrisColeTech/ComfyUI-Get-Random-File/blob/main/img/preview2.jpg)
 
-🎲 **Random Image Path**  
+🖼️ **Get Video By Index**  
 ![Preview Image](https://github.com/ChrisColeTech/ComfyUI-Get-Random-File/blob/main/img/preview1.jpg)
+
+📸 **Get Image By Index**  
+![Preview Image](https://github.com/ChrisColeTech/ComfyUI-Get-Random-File/blob/main/img/preview4.jpg)
 
 ## Installation 🛠️
 
