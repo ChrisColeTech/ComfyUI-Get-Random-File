@@ -134,7 +134,7 @@ class RandomImagePathNode:
                 }],
                     "text": [index_text, info_text, temp_filename]
             },
-            "result": (image_tensor, info_text)
+            "result": (image_tensor, path)
         }
         
         return results
@@ -254,7 +254,7 @@ class GetImageFileByIndexNode:
                 }],
                 "text": [index_text, info_text, temp_filename]
             },
-            "result": (image_tensor, info_text, float(counter), int(counter))
+            "result": (image_tensor, path, float(counter), int(counter))
         }
         
         return results
@@ -362,7 +362,7 @@ class RandomVideoPathNode:
                 }] if temp_filename else [],
                 "text": [index_text, video_info_text, temp_filename]
             },
-            "result": (images, os.path.basename(path))
+            "result": (images, path)
         }
         
         return results
@@ -550,7 +550,7 @@ class GetVideoFileByIndexNode:
                 }] if temp_filename else [],
                 "text": [index_text, video_info_text, temp_filename]
             },
-            "result": (images, os.path.basename(path), float(counter), int(counter))
+            "result": (images, path, float(counter), int(counter))
         }
         
         return results
