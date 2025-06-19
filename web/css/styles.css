@@ -1,0 +1,16 @@
+/* Hide default ComfyUI image widgets for our custom nodes */
+.node[title*="Get Image File By Index"] .image,
+.node[title*="Get Video File By Index"] .image,
+.node[title*="Get Image File By Index"] img.preview,
+.node[title*="Get Video File By Index"] img.preview {
+    display: none !important;
+    height: 0 !important;
+    visibility: hidden !important;
+}
+
+/* Hide the image widget container */
+.node[title*="Get Image File By Index"] .widget.image,
+.node[title*="Get Video File By Index"] .widget.image {
+    display: none !important;
+    height: 0 !important;
+}

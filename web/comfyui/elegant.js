@@ -67,7 +67,7 @@ class Elegant extends EventTarget {
     })
 
     this.initializeContextMenu()
-    this.cssPromise = injectCss('extensions/ComfyUI-Get-Random-File/comfyui/elegant.css')
+    //this.cssPromise = injectCss('extensions/ComfyUI-Get-Random-File/comfyui/elegant.css')
   }
 
   async initializeGraphAndCanvasHooks() {

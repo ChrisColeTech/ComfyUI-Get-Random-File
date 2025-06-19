@@ -4,6 +4,9 @@ import torch
 from PIL import Image, ImageOps
 import numpy as np
 import cv2
+import folder_paths
+import shutil
+import hashlib
 
 
 class RandomFilePathNode:
@@ -23,6 +26,7 @@ class RandomFilePathNode:
         return float("NaN")
 
     RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("filename")
     FUNCTION = "get_random_file_path"
     CATEGORY = "🤖 CCTech/Files"
 
@@ -59,6 +63,9 @@ class RandomImagePathNode:
             "required": {
                 "directory_path": ("STRING", {"default": ""}),
             },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+            }
         }
 
     @classmethod
@@ -66,10 +73,11 @@ class RandomImagePathNode:
         return float("NaN")
 
     RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("image", "filename")
     FUNCTION = "get_random_image_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_image_path(self, directory_path) -> tuple:
+    def get_random_image_path(self, directory_path, unique_id) -> tuple:
         if not os.path.isdir(directory_path):
             raise NotADirectoryError(
                 f"'{directory_path}' is not a valid directory path.")
@@ -93,42 +101,77 @@ class RandomImagePathNode:
 
         # Select a random image path
         path = random.choice(files)
+        
+        # Load the image
         image = Image.open(path)
         image = ImageOps.exif_transpose(image)
         image = image.convert("RGB")
-        image = np.array(image).astype(np.float32) / 255.0
-        image = torch.from_numpy(image)[None,]
+        image_np = np.array(image).astype(np.float32) / 255.0
+        image_tensor = torch.from_numpy(image_np)[None,]
+        
+        # Copy image to ComfyUI's temp folder for preview
+        temp_dir = folder_paths.get_temp_directory()
+        
+        # Generate a unique filename based on the original path
+        file_hash = hashlib.md5(path.encode()).hexdigest()[:8]
+        file_ext = os.path.splitext(path)[1]
+        temp_filename = f"preview_{unique_id}_{file_hash}{file_ext}"
+        temp_path = os.path.join(temp_dir, temp_filename)
+        
+        # Copy the file to temp directory
+        shutil.copy2(path, temp_path)
+        
+        index_text = f"" 
+        info_text =  os.path.basename(path)
 
-        return (image, path)
+        # Return results including UI update
+        results = {
+            "ui": {
+                "images": [{
+                    # "filename": temp_filename,
+                    "subfolder": "",
+                    "type": "temp"
+                }],
+                    "text": [index_text, info_text, temp_filename]
+            },
+            "result": (image_tensor, info_text)
+        }
+        
+        return results
 
 
 class GetImageFileByIndexNode:
     def __init__(self):
         self.counters = {}
+        self.type = "output"
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "mode": (["increment", "decrement", "increment_to_stop", "decrement_to_stop"],),
-                "start": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
-                "stop": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
-                "step": ("FLOAT", {"default": 1, "min": 0, "max": 99999, "step": 0.01}),
+                "reset_bool": ("BOOLEAN", {"default": False}),
+                "mode": (["increment", "decrement", "increment_to_stop", "decrement_to_stop"], {"default": "increment"}),
+                "start": ("INT", {"default": 0, "min": 0, "max": 18446744073709551615, "step": 1}),
+                "stop": ("INT", {"default": 1, "min": 1, "max": 18446744073709551615, "step": 1}),
+                "step": ("INT", {"default": 1, "min": 1, "max": 99999, "step": 1}),
                 "directory_path": ("STRING", {"default": ""})
-            },
-            "optional": {
-                "reset_bool": ("NUMBER",),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "STRING")
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("NaN")
+    
+    RETURN_TYPES = ("IMAGE", "STRING","NUMBER", "INT")
+    RETURN_NAMES = ("image", "filename","index", "int")
     FUNCTION = "get_image_path_by_index"
     CATEGORY = "🤖 CCTech/Files"
+    OUTPUT_NODE = True
 
-    def get_image_path_by_index(self, directory_path, mode, start, stop, step, unique_id, reset_bool=0) -> str:
+    def get_image_path_by_index(self, directory_path, mode, start, stop, step, unique_id, reset_bool) -> str:
         if not os.path.isdir(directory_path):
             raise NotADirectoryError(
                 f"'{directory_path}' is not a valid directory path.")
@@ -151,16 +194,16 @@ class GetImageFileByIndexNode:
                 f"No image files found in directory: {directory_path}")
 
   
-        counter = int(start) if mode == 'integer' else start
+        counter = int(start)
         if self.counters.__contains__(unique_id):
             counter = self.counters[unique_id]
 
-        if round(reset_bool) >= 1:
+        if reset_bool:
             counter = start
 
         if mode == 'increment':
             counter += step
-        elif mode == 'deccrement':
+        elif mode == 'decrement':
             counter -= step
         elif mode == 'increment_to_stop':
             counter = counter + step if counter < stop else counter
@@ -171,14 +214,50 @@ class GetImageFileByIndexNode:
 
         result = int(counter) 
 
+        # Handle wrap-around
+        if result >= len(files):
+            result = result % len(files)
+        elif result < 0:
+            result = len(files) + (result % len(files))
+            
         path = files[result]
+        
+        # Load the image
         image = Image.open(path)
         image = ImageOps.exif_transpose(image)
         image = image.convert("RGB")
-        image = np.array(image).astype(np.float32) / 255.0
-        image = torch.from_numpy(image)[None,]
+        image_np = np.array(image).astype(np.float32) / 255.0
+        image_tensor = torch.from_numpy(image_np)[None,]
+        
+        # Copy image to ComfyUI's temp folder for preview
+        temp_dir = folder_paths.get_temp_directory()
+        
+        # Generate a unique filename based on the original path
+        file_hash = hashlib.md5(path.encode()).hexdigest()[:8]
+        file_ext = os.path.splitext(path)[1]
+        temp_filename = f"preview_{unique_id}_{file_hash}{file_ext}"
+        temp_path = os.path.join(temp_dir, temp_filename)
+        
+        # Copy the file to temp directory
+        shutil.copy2(path, temp_path)
 
-        return (image, path)
+        index_text = f"Index: {result} / {len(files) - 1}" 
+        info_text =  os.path.basename(path)
+
+        # Return results including UI update
+        results = {
+            "ui": {
+                "images": [{
+                    # "filename": os.path.basename(path),
+                    "subfolder": "",
+                    "type": "temp"
+                }],
+                "text": [index_text, info_text, temp_filename]
+            },
+            "result": (image_tensor, info_text, float(counter), int(counter))
+        }
+        
+        return results
 
 
 video_extensions = ('webm', 'mp4', 'mkv', 'gif')
@@ -194,6 +273,9 @@ class RandomVideoPathNode:
             "required": {
                 "directory_path": ("STRING", {"default": ""}),
             },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+            }
         }
 
     @classmethod
@@ -201,12 +283,12 @@ class RandomVideoPathNode:
         return float("NaN")
 
     RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("images", "STRING")
+    RETURN_NAMES = ("images", "filename")
 
     FUNCTION = "get_random_video_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_video_path(self, directory_path) -> tuple:
+    def get_random_video_path(self, directory_path, unique_id) -> tuple:
         if not os.path.isdir(directory_path):
             raise NotADirectoryError(
                 f"'{directory_path}' is not a valid directory path.")
@@ -232,7 +314,59 @@ class RandomVideoPathNode:
         path = random.choice(files)
         images = FrameGenerator(path)
 
-        return (images, path)
+        # Get video info and first frame for preview
+        video_cap = cv2.VideoCapture(path)
+        if not video_cap.isOpened():
+            raise ValueError(f"Could not open video file: {path}")
+            
+        # Get video properties
+        fps = video_cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        duration = frame_count / fps if fps > 0 else 0
+        
+        # Read first frame for preview
+        ret, first_frame = video_cap.read()
+        video_cap.release()
+        
+        if ret:
+            # Convert first frame for preview
+            first_frame = cv2.cvtColor(first_frame, cv2.COLOR_BGR2RGB)
+            preview_image = Image.fromarray(first_frame)
+            
+            # Save preview to temp folder
+            temp_dir = folder_paths.get_temp_directory()
+            file_hash = hashlib.md5(path.encode()).hexdigest()[:8]
+            temp_filename = f"video_preview_{unique_id}_{file_hash}.png"
+            temp_path = os.path.join(temp_dir, temp_filename)
+            preview_image.save(temp_path)
+        else:
+            temp_filename = None
+        
+        # Load all frames using FrameGenerator
+        images = FrameGenerator(path)
+        
+        # Return results including UI update
+        duration_str = f"{duration:.2f}s" if duration else "0s"
+        index_text = os.path.basename(path)
+        video_info_text = f"{width}x{height} • {frame_count} frames • {fps:.2f} fps • {duration_str}"
+        
+    
+        results = {
+            "ui": {
+                "images": [{
+                    # "filename": temp_filename,
+                    "subfolder": "",
+                    "type": "temp"
+                }] if temp_filename else [],
+                "text": [index_text, video_info_text, temp_filename]
+            },
+            "result": (images, os.path.basename(path))
+        }
+        
+        return results
+
 
 
 def get_video_frames(video_path):
@@ -292,19 +426,18 @@ class FrameGenerator:
 class GetVideoFileByIndexNode:
     def __init__(self):
         self.counters = {}
+        self.type = "output"
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "mode": (["increment", "decrement", "increment_to_stop", "decrement_to_stop"],),
-                "start": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
-                "stop": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
-                "step": ("FLOAT", {"default": 1, "min": 0, "max": 99999, "step": 0.01}),
+                "reset_bool": ("BOOLEAN", {"default": False}),
+                "mode": (["increment", "decrement", "increment_to_stop", "decrement_to_stop"], {"default": "increment"}),
+                "start": ("INT", {"default": 0, "min": 0, "max": 18446744073709551615, "step": 1}),
+                "stop": ("INT", {"default": 1, "min": 1, "max": 18446744073709551615, "step": 1}),
+                "step": ("INT", {"default": 1, "min": 1, "max": 99999, "step": 1}),
                 "directory_path": ("STRING", {"default": ""})
-            },
-            "optional": {
-                "reset_bool": ("NUMBER",),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -315,12 +448,13 @@ class GetVideoFileByIndexNode:
     def IS_CHANGED(cls, **kwargs):
         return float("NaN")
     
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("images", "STRING")
+    RETURN_TYPES = ("IMAGE", "STRING","NUMBER", "INT")
+    RETURN_NAMES = ("images", "filename","index", "int")
     FUNCTION = "get_video_path_by_index"
     CATEGORY = "🤖 CCTech/Files"
+    OUTPUT_NODE = True
 
-    def get_video_path_by_index(self, directory_path, mode, start, stop, step, unique_id, reset_bool=0) -> str:
+    def get_video_path_by_index(self, directory_path, mode, start, stop, step, unique_id, reset_bool) -> str:
         if not os.path.isdir(directory_path):
             raise NotADirectoryError(
                 f"'{directory_path}' is not a valid directory path.")
@@ -341,16 +475,16 @@ class GetVideoFileByIndexNode:
             raise FileNotFoundError(
                 f"No video files found in directory: {directory_path}")
         
-        counter = int(start) if mode == 'integer' else start
+        counter = int(start) 
         if self.counters.__contains__(unique_id):
             counter = self.counters[unique_id]
 
-        if round(reset_bool) >= 1:
+        if reset_bool:
             counter = start
 
         if mode == 'increment':
             counter += step
-        elif mode == 'deccrement':
+        elif mode == 'decrement':
             counter -= step
         elif mode == 'increment_to_stop':
             counter = counter + step if counter < stop else counter
@@ -359,12 +493,67 @@ class GetVideoFileByIndexNode:
 
         self.counters[unique_id] = counter
 
-        result = int(counter) 
+        result = int(counter)
+        
+        # Handle wrap-around
+        if result >= len(files):
+            result = result % len(files)
+        elif result < 0:
+            result = len(files) + (result % len(files))
 
         path = files[result]
+        
+        # Get video info and first frame for preview
+        video_cap = cv2.VideoCapture(path)
+        if not video_cap.isOpened():
+            raise ValueError(f"Could not open video file: {path}")
+            
+        # Get video properties
+        fps = video_cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        duration = frame_count / fps if fps > 0 else 0
+        
+        # Read first frame for preview
+        ret, first_frame = video_cap.read()
+        video_cap.release()
+        
+        if ret:
+            # Convert first frame for preview
+            first_frame = cv2.cvtColor(first_frame, cv2.COLOR_BGR2RGB)
+            preview_image = Image.fromarray(first_frame)
+            
+            # Save preview to temp folder
+            temp_dir = folder_paths.get_temp_directory()
+            file_hash = hashlib.md5(path.encode()).hexdigest()[:8]
+            temp_filename = f"video_preview_{unique_id}_{file_hash}.png"
+            temp_path = os.path.join(temp_dir, temp_filename)
+            preview_image.save(temp_path)
+        else:
+            temp_filename = None
+        
+        # Load all frames using FrameGenerator
         images = FrameGenerator(path)
-
-        return (images, path)
+        
+        # Return results including UI update
+        duration_str = f"{duration:.2f}s" if duration else "0s"
+        video_info_text = f"{width}x{height} • {frame_count} frames • {fps:.2f} fps • {duration_str}"
+        index_text = f"{os.path.basename(path)} \n\n Index: {result} / {len(files) - 1}"
+        
+        results = {
+            "ui": {
+                "images": [{
+                    # "filename": temp_filename,
+                    "subfolder": "",
+                    "type": "temp"
+                }] if temp_filename else [],
+                "text": [index_text, video_info_text, temp_filename]
+            },
+            "result": (images, os.path.basename(path), float(counter), int(counter))
+        }
+        
+        return results
 
 NODE_CLASS_MAPPINGS = {
     "Random Video Path": RandomVideoPathNode,
