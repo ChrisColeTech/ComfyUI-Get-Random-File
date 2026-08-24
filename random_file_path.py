@@ -152,7 +152,7 @@ class GetImageFileByIndexNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "reset_bool": ("BOOLEAN", {"default": False, "label_on": "Reset", "label_off": "Off"}),
+                "reset_bool": ("BOOLEAN", {"default": False}),
                 "mode": (["increment", "decrement", "increment_to_stop", "decrement_to_stop"], {"default": "increment"}),
                 "start": ("INT", {"default": 0, "min": 0, "max": 18446744073709551615, "step": 1}),
                 "stop": ("INT", {"default": 1, "min": 1, "max": 18446744073709551615, "step": 1}),
@@ -437,7 +437,7 @@ class GetVideoFileByIndexNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "reset_bool": ("BOOLEAN", {"default": False, "label_on": "Reset", "label_off": "Off"}),
+                "reset_bool": ("BOOLEAN", {"default": False}),
                 "mode": (["increment", "decrement", "increment_to_stop", "decrement_to_stop"], {"default": "increment"}),
                 "start": ("INT", {"default": 0, "min": 0, "max": 18446744073709551615, "step": 1}),
                 "stop": ("INT", {"default": 1, "min": 1, "max": 18446744073709551615, "step": 1}),
