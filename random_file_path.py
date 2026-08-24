@@ -128,7 +128,7 @@ class RandomImagePathNode:
         results = {
             "ui": {
                 "images": [{
-                    # "filename": temp_filename,
+                    "filename": temp_filename,
                     "subfolder": "",
                     "type": "temp"
                 }],
@@ -248,7 +248,7 @@ class GetImageFileByIndexNode:
         results = {
             "ui": {
                 "images": [{
-                    # "filename": os.path.basename(path),
+                    "filename": temp_filename,
                     "subfolder": "",
                     "type": "temp"
                 }],
@@ -356,7 +356,7 @@ class RandomVideoPathNode:
         results = {
             "ui": {
                 "images": [{
-                    # "filename": temp_filename,
+                    "filename": temp_filename,
                     "subfolder": "",
                     "type": "temp"
                 }] if temp_filename else [],
@@ -544,7 +544,7 @@ class GetVideoFileByIndexNode:
         results = {
             "ui": {
                 "images": [{
-                    # "filename": temp_filename,
+                    "filename": temp_filename,
                     "subfolder": "",
                     "type": "temp"
                 }] if temp_filename else [],
