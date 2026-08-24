@@ -10,6 +10,7 @@ import hashlib
 
 
 class RandomFilePathNode:
+    SEARCH_ALIASES = ['random file', 'pick random file', 'file path']
     def __init__(self):
         pass
 
@@ -54,6 +55,7 @@ class RandomFilePathNode:
 
 
 class RandomImagePathNode:
+    SEARCH_ALIASES = ['random image', 'pick random image', 'load random image']
     def __init__(self):
         pass
 
@@ -141,6 +143,7 @@ class RandomImagePathNode:
 
 
 class GetImageFileByIndexNode:
+    SEARCH_ALIASES = ['image by index', 'indexed image', 'load image sequence', 'image counter']
     def __init__(self):
         self.counters = {}
         self.type = "output"
@@ -264,6 +267,7 @@ video_extensions = ('webm', 'mp4', 'mkv', 'gif')
 
 
 class RandomVideoPathNode:
+    SEARCH_ALIASES = ['random video', 'pick random video', 'load random video']
     def __init__(self):
         pass
 
@@ -424,6 +428,7 @@ class FrameGenerator:
 
 
 class GetVideoFileByIndexNode:
+    SEARCH_ALIASES = ['video by index', 'indexed video', 'load video sequence', 'video counter']
     def __init__(self):
         self.counters = {}
         self.type = "output"
