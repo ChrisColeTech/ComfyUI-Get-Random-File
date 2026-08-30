@@ -49,7 +49,7 @@ def _load_image_outputs(path):
 
 def _probe_video_meta(path):
     """(fps, frame_count, width, height) from the container header only - no
-    frame decoding. Used when split_components is off so fps/frame_count and
+    frame decoding. Used when split is off so fps/frame_count and
     the preview info line stay real without paying for a full decode."""
     import av
     with av.open(path) as container:
@@ -62,7 +62,7 @@ def _probe_video_meta(path):
         return fps, frames, int(cc.width), int(cc.height)
 
 
-def _load_video_outputs(path, split_components=True):
+def _load_video_outputs(path, split=True):
     """(VIDEO, IMAGE [T,H,W,C]|None, AUDIO|None, fps, frame_count, w, h) via
     comfy-core's own VideoFromFile - the SAME object core LoadVideo outputs,
     so everything downstream of a LoadVideo works identically downstream of
@@ -70,12 +70,12 @@ def _load_video_outputs(path, split_components=True):
     per-frame tensors, not a valid IMAGE batch, with no audio and no timing)
     is gone.
 
-    split_components=False skips the frame/audio decode entirely (the
+    split=False skips the frame/audio decode entirely (the
     expensive part): images/audio come back None (leave those outputs
     unwired), while video/filename stay fully functional and
     fps/frame_count/resolution come from a header-only probe."""
     video = VideoFromFile(path)
-    if not split_components:
+    if not split:
         fps, frame_count, w, h = _probe_video_meta(path)
         return video, None, None, fps, frame_count, w, h
     components = video.get_components()
@@ -86,15 +86,15 @@ def _load_video_outputs(path, split_components=True):
     return video, images, audio, fps, frame_count, int(images.shape[2]), int(images.shape[1])
 
 
-# lock_selection state: {unique_id: last picked path} - the "bypass the
-# randomizer" switch. Per node instance, held for the process lifetime.
+# randomize-off state: {unique_id: last picked path}. Per node instance,
+# held for the process lifetime.
 _HELD_PICKS = {}
 
 
-def _pick(files, unique_id, lock_selection):
-    """random.choice, unless lock_selection holds the previous pick (re-rolls
-    only if the held file disappeared or the switch is off)."""
-    if lock_selection:
+def _pick(files, unique_id, randomize):
+    """random.choice, unless randomize is OFF - then the previous pick is
+    held (re-rolls only if the held file disappeared)."""
+    if not randomize:
         held = _HELD_PICKS.get(unique_id)
         if held is not None and os.path.isfile(held):
             return held
@@ -154,10 +154,11 @@ class RandomFilePathNode:
                 "directory_path": ("STRING", {"default": ""}),
             },
             "optional": {
-                "lock_selection": ("BOOLEAN", {"default": False,
-                    "tooltip": "On = lock onto the currently selected file - every run returns it "
-                               "again instead of picking a new random one (per node; unlocks if the "
-                               "file no longer exists or this is switched off)."}),
+                "randomize": ("BOOLEAN", {"default": True,
+                    "tooltip": "On (default) = pick a new random file every run. "
+                               "Off = keep returning the currently selected file "
+                               "(per node; re-picks only if that file no longer "
+                               "exists)."}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -173,9 +174,9 @@ class RandomFilePathNode:
     FUNCTION = "get_random_file_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_file_path(self, directory_path: str, unique_id=None, lock_selection=False):
+    def get_random_file_path(self, directory_path: str, unique_id=None, randomize=True):
         files = _walk_files(directory_path)
-        return (_pick(files, unique_id, lock_selection),)
+        return (_pick(files, unique_id, randomize),)
 
 
 class RandomImagePathNode:
@@ -188,10 +189,11 @@ class RandomImagePathNode:
                 "directory_path": ("STRING", {"default": ""}),
             },
             "optional": {
-                "lock_selection": ("BOOLEAN", {"default": False,
-                    "tooltip": "On = lock onto the currently selected file - every run returns it "
-                               "again instead of picking a new random one (per node; unlocks if the "
-                               "file no longer exists or this is switched off)."}),
+                "randomize": ("BOOLEAN", {"default": True,
+                    "tooltip": "On (default) = pick a new random file every run. "
+                               "Off = keep returning the currently selected file "
+                               "(per node; re-picks only if that file no longer "
+                               "exists)."}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -209,9 +211,9 @@ class RandomImagePathNode:
     FUNCTION = "get_random_image_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_image_path(self, directory_path, unique_id, lock_selection=False):
+    def get_random_image_path(self, directory_path, unique_id, randomize=True):
         files = _walk_files(directory_path, image_extensions)
-        path = _pick(files, unique_id, lock_selection)
+        path = _pick(files, unique_id, randomize)
         image_tensor, mask = _load_image_outputs(path)
         token = _register_preview(path)
         h, w = image_tensor.shape[1], image_tensor.shape[2]
@@ -298,11 +300,12 @@ class RandomVideoPathNode:
                 "directory_path": ("STRING", {"default": ""}),
             },
             "optional": {
-                "lock_selection": ("BOOLEAN", {"default": False,
-                    "tooltip": "On = lock onto the currently selected file - every run returns it "
-                               "again instead of picking a new random one (per node; unlocks if the "
-                               "file no longer exists or this is switched off)."}),
-                "split_components": ("BOOLEAN", {"default": True,
+                "randomize": ("BOOLEAN", {"default": True,
+                    "tooltip": "On (default) = pick a new random file every run. "
+                               "Off = keep returning the currently selected file "
+                               "(per node; re-picks only if that file no longer "
+                               "exists)."}),
+                "split": ("BOOLEAN", {"default": True,
                     "tooltip": "Off = skip decoding frames/audio entirely (much faster "
                                "when you only need the video/filename outputs - they "
                                "stay fully functional; fps/frame_count come from the "
@@ -326,20 +329,20 @@ class RandomVideoPathNode:
     FUNCTION = "get_random_video_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_video_path(self, directory_path, unique_id, lock_selection=False,
-                              split_components=True):
+    def get_random_video_path(self, directory_path, unique_id, randomize=True,
+                              split=True):
         files = _walk_files(directory_path, video_extensions)
-        path = _pick(files, unique_id, lock_selection)
+        path = _pick(files, unique_id, randomize)
         video, images, audio, fps, frame_count, w, h = _load_video_outputs(
-            path, split_components)
+            path, split)
         token = _register_preview(path)
 
         duration = frame_count / fps if fps > 0 else 0
         video_info_text = (f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • "
                            f"{duration:.2f}s"
-                           + ("" if (audio is not None or not split_components)
+                           + ("" if (audio is not None or not split)
                               else " • no audio")
-                           + ("" if split_components else " • components bypassed"))
+                           + ("" if split else " • components bypassed"))
         return {
             "ui": {
                 "text": ["video", token, os.path.basename(path), video_info_text],
@@ -367,7 +370,7 @@ class GetVideoFileByIndexNode:
                 "directory_path": ("STRING", {"default": ""})
             },
             "optional": {
-                "split_components": ("BOOLEAN", {"default": True,
+                "split": ("BOOLEAN", {"default": True,
                     "tooltip": "Off = skip decoding frames/audio entirely (much faster "
                                "when you only need the video/filename outputs - they "
                                "stay fully functional; fps/frame_count come from the "
@@ -391,20 +394,20 @@ class GetVideoFileByIndexNode:
     _advance = GetImageFileByIndexNode._advance
 
     def get_video_path_by_index(self, directory_path, mode, start, stop, step, unique_id,
-                                reset_bool, split_components=True):
+                                reset_bool, split=True):
         files = _walk_files(directory_path, video_extensions)
         counter, result = self._advance(unique_id, mode, start, stop, step, reset_bool, len(files))
         path = files[result]
         video, images, audio, fps, frame_count, w, h = _load_video_outputs(
-            path, split_components)
+            path, split)
         token = _register_preview(path)
 
         duration = frame_count / fps if fps > 0 else 0
         video_info_text = (f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • "
                            f"{duration:.2f}s • Index: {result} / {len(files) - 1}"
-                           + ("" if (audio is not None or not split_components)
+                           + ("" if (audio is not None or not split)
                               else " • no audio")
-                           + ("" if split_components else " • components bypassed"))
+                           + ("" if split else " • components bypassed"))
         return {
             "ui": {
                 "text": ["video", token, os.path.basename(path), video_info_text],
