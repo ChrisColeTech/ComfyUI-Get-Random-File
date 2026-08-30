@@ -86,15 +86,15 @@ def _load_video_outputs(path, split_components=True):
     return video, images, audio, fps, frame_count, int(images.shape[2]), int(images.shape[1])
 
 
-# keep_current state: {unique_id: last picked path} - the "bypass the
+# lock_selection state: {unique_id: last picked path} - the "bypass the
 # randomizer" switch. Per node instance, held for the process lifetime.
 _HELD_PICKS = {}
 
 
-def _pick(files, unique_id, keep_current):
-    """random.choice, unless keep_current holds the previous pick (re-rolls
+def _pick(files, unique_id, lock_selection):
+    """random.choice, unless lock_selection holds the previous pick (re-rolls
     only if the held file disappeared or the switch is off)."""
-    if keep_current:
+    if lock_selection:
         held = _HELD_PICKS.get(unique_id)
         if held is not None and os.path.isfile(held):
             return held
@@ -154,9 +154,9 @@ class RandomFilePathNode:
                 "directory_path": ("STRING", {"default": ""}),
             },
             "optional": {
-                "keep_current": ("BOOLEAN", {"default": False,
-                    "tooltip": "On = keep returning the file picked on the last run "
-                               "instead of re-rolling (per node; re-rolls only if that "
+                "lock_selection": ("BOOLEAN", {"default": False,
+                    "tooltip": "On = lock onto the currently selected file - every run returns it "
+                               "again instead of picking a new random one (per node; unlocks if the "
                                "file no longer exists or this is switched off)."}),
             },
             "hidden": {
@@ -173,9 +173,9 @@ class RandomFilePathNode:
     FUNCTION = "get_random_file_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_file_path(self, directory_path: str, unique_id=None, keep_current=False):
+    def get_random_file_path(self, directory_path: str, unique_id=None, lock_selection=False):
         files = _walk_files(directory_path)
-        return (_pick(files, unique_id, keep_current),)
+        return (_pick(files, unique_id, lock_selection),)
 
 
 class RandomImagePathNode:
@@ -188,9 +188,9 @@ class RandomImagePathNode:
                 "directory_path": ("STRING", {"default": ""}),
             },
             "optional": {
-                "keep_current": ("BOOLEAN", {"default": False,
-                    "tooltip": "On = keep returning the file picked on the last run "
-                               "instead of re-rolling (per node; re-rolls only if that "
+                "lock_selection": ("BOOLEAN", {"default": False,
+                    "tooltip": "On = lock onto the currently selected file - every run returns it "
+                               "again instead of picking a new random one (per node; unlocks if the "
                                "file no longer exists or this is switched off)."}),
             },
             "hidden": {
@@ -209,9 +209,9 @@ class RandomImagePathNode:
     FUNCTION = "get_random_image_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_image_path(self, directory_path, unique_id, keep_current=False):
+    def get_random_image_path(self, directory_path, unique_id, lock_selection=False):
         files = _walk_files(directory_path, image_extensions)
-        path = _pick(files, unique_id, keep_current)
+        path = _pick(files, unique_id, lock_selection)
         image_tensor, mask = _load_image_outputs(path)
         token = _register_preview(path)
         h, w = image_tensor.shape[1], image_tensor.shape[2]
@@ -298,9 +298,9 @@ class RandomVideoPathNode:
                 "directory_path": ("STRING", {"default": ""}),
             },
             "optional": {
-                "keep_current": ("BOOLEAN", {"default": False,
-                    "tooltip": "On = keep returning the file picked on the last run "
-                               "instead of re-rolling (per node; re-rolls only if that "
+                "lock_selection": ("BOOLEAN", {"default": False,
+                    "tooltip": "On = lock onto the currently selected file - every run returns it "
+                               "again instead of picking a new random one (per node; unlocks if the "
                                "file no longer exists or this is switched off)."}),
                 "split_components": ("BOOLEAN", {"default": True,
                     "tooltip": "Off = skip decoding frames/audio entirely (much faster "
@@ -326,10 +326,10 @@ class RandomVideoPathNode:
     FUNCTION = "get_random_video_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_video_path(self, directory_path, unique_id, keep_current=False,
+    def get_random_video_path(self, directory_path, unique_id, lock_selection=False,
                               split_components=True):
         files = _walk_files(directory_path, video_extensions)
-        path = _pick(files, unique_id, keep_current)
+        path = _pick(files, unique_id, lock_selection)
         video, images, audio, fps, frame_count, w, h = _load_video_outputs(
             path, split_components)
         token = _register_preview(path)
