@@ -1,5 +1,8 @@
-from .random_file_path import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+from .random_file_path import (NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS,
+                               register_preview_route)
 import random
+
+register_preview_route()
 
 tech_rambling = [
     "Zap zap zoom!", "Sproing-a-ling!", "Flux capacitor charged!", "Circuit party started!",

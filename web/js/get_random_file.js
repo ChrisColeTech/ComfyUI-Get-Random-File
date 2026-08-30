@@ -6,32 +6,40 @@ import { addStylesheet } from '../../../scripts/utils.js'
 // Add custom styles
 addStylesheet('css/styles.css', import.meta.url)
 
-// Helper function to create image preview widget
-function createImagePreviewWidget(node, nodeName) {
-  // Create a wrapper div for our image display
+// One preview per node: a single DOM widget holding either a playable
+// <video> (VHS-style, streamed from this pack's own token endpoint with
+// Range support so seeking works) or an <img>. The backend no longer sends
+// ui.images at all, so comfy's built-in canvas preview never draws a second
+// copy - that was the old duplication.
+//
+// ui.text schema from the backend: [kind, token, title, info]
+//   kind  - "video" | "image"
+//   token - preview token for /cctech_random_file/view
+//   title - filename
+//   info  - resolution / frames / fps / duration / index line
+
+function createMediaPreviewWidget(node) {
   const container = $el('div', {
-    style: {
-      width: '100%',
-      maxHeight: '600px',
-    },
+    style: { width: '100%', maxHeight: '600px' },
   })
 
-  const imageWrapper = $el('div', {
-    style: {
-      width: '100%',
-      maxHeight: '400px',
-    },
+  const mediaWrapper = $el('div', {
+    style: { width: '100%', maxHeight: '400px' },
   })
 
-  const textWrapper = $el('div', {
+  const videoElement = $el('video', {
     style: {
-      width: '100%',
-      display: 'flex',
-      flexDirection: 'column',
+      maxWidth: '100%',
+      objectFit: 'contain',
+      borderRadius: '4px',
+      display: 'none',
     },
+    controls: true,
+    muted: true,
+    loop: true,
+    autoplay: true,
   })
 
-  // Create an img element
   const imgElement = $el('img', {
     style: {
       maxWidth: '100%',
@@ -41,29 +49,12 @@ function createImagePreviewWidget(node, nodeName) {
     },
   })
 
-  // Create a placeholder text
   const placeholder = $el('div', {
-    style: {
-      color: '#666',
-      fontSize: '14px',
-      textAlign: 'center',
-    },
-    textContent: nodeName === 'Get Video File By Index' ? 'No video selected' : 'No image selected',
+    style: { color: '#666', fontSize: '14px', textAlign: 'center' },
+    textContent: 'Nothing selected yet - run the workflow',
   })
 
-  // Create info text for filename
-  const filenameText = $el('div', {
-    style: {
-      color: '#999',
-      fontSize: '12px',
-      textAlign: 'center',
-      marginTop: '5px',
-      display: 'none',
-    },
-  })
-
-  // Create index display
-  const indexText = $el('div', {
+  const titleText = $el('div', {
     style: {
       color: '#aaa',
       fontSize: '14px',
@@ -74,8 +65,7 @@ function createImagePreviewWidget(node, nodeName) {
     },
   })
 
-  // Create extra info display (for video info)
-  const extraInfoText = $el('div', {
+  const infoText = $el('div', {
     style: {
       color: '#888',
       fontSize: '12px',
@@ -85,313 +75,77 @@ function createImagePreviewWidget(node, nodeName) {
     },
   })
 
-  imageWrapper.appendChild(imgElement)
-  textWrapper.appendChild(placeholder)
-  textWrapper.appendChild(filenameText)
-  textWrapper.appendChild(indexText)
-  textWrapper.appendChild(extraInfoText)
+  mediaWrapper.appendChild(videoElement)
+  mediaWrapper.appendChild(imgElement)
+  container.appendChild(mediaWrapper)
+  container.appendChild(placeholder)
+  container.appendChild(titleText)
+  container.appendChild(infoText)
 
-  container.appendChild(imageWrapper)
-  container.appendChild(textWrapper)
+  const widget = node.addDOMWidget('mediaPreview', 'custom', container)
 
-  // Add the DOM widget to the node
-  const widget = node.addDOMWidget('imagePreview', 'custom', container)
-
-  // Store references
-  node.imageElement = imgElement
-  node.placeholderElement = placeholder
-  node.filenameElement = filenameText
-  node.indexElement = indexText
-  node.extraInfoElement = extraInfoText
-
-  // Function to update the displayed image
-  node.updateImage = function (images, textInfo) {
-    if (textInfo && textInfo.length > 0) {
-      const imageData = images[0]
-
-      imgElement.style.display = 'block'
-      placeholder.style.display = 'none'
-
-      // Show text info if available
-      if (textInfo && textInfo.length > 0) {
-        // First text element is index info
-        indexText.textContent = textInfo[0]
-        indexText.style.display = 'block'
-
-        // Second text element is video info (if available)
-        if (textInfo.length > 1) {
-          extraInfoText.textContent = textInfo[1]
-          const url = api.apiURL(
-            `/view?filename=${encodeURIComponent(textInfo[2])}&type=${
-              imageData.type || 'temp'
-            }&subfolder=${imageData.subfolder || ''}`,
-          )
-          imgElement.src = url
-          extraInfoText.style.display = 'block'
-        }
-      }
-    } else {
+  node.updateMediaPreview = function (textInfo) {
+    if (!textInfo || textInfo.length < 4 || !textInfo[1]) {
+      videoElement.style.display = 'none'
       imgElement.style.display = 'none'
       placeholder.style.display = 'block'
-      filenameText.style.display = 'none'
-      indexText.style.display = 'none'
-      extraInfoText.style.display = 'none'
+      titleText.style.display = 'none'
+      infoText.style.display = 'none'
+      return
     }
+    const [kind, token, title, info] = textInfo
+    const url = api.apiURL(
+      `/cctech_random_file/view?token=${encodeURIComponent(token)}`,
+    )
+    placeholder.style.display = 'none'
+    if (kind === 'video') {
+      imgElement.style.display = 'none'
+      videoElement.src = url
+      videoElement.style.display = 'block'
+    } else {
+      videoElement.pause?.()
+      videoElement.style.display = 'none'
+      imgElement.src = url
+      imgElement.style.display = 'block'
+    }
+    titleText.textContent = title || ''
+    titleText.style.display = title ? 'block' : 'none'
+    infoText.textContent = info || ''
+    infoText.style.display = info ? 'block' : 'none'
   }
 
-  // Handle widget height
   widget.computeSize = function (width) {
-    return [width, 200]
+    return [width, 240]
   }
 
   return widget
 }
 
-// Helper function to hide default image widgets
-function hideDefaultImageWidgets(node) {
-  // Find all widgets that might display images
-  const imageWidgets = node.widgets?.filter((w) => {
-    return (
-      w.type === 'image' ||
-      w.name === 'image' ||
-      w.name === 'images' ||
-      (w.element && w.element.tagName === 'IMG')
-    )
-  })
-
-  imageWidgets?.forEach((widget) => {
-    widget.type = 'hidden'
-    widget.computeSize = () => [0, -4]
-
-    // Hide the widget's DOM element
-    if (widget.element) {
-      widget.element.style.display = 'none'
-    }
-
-    // Hide the wrapper if it exists
-    if (widget.wrapper) {
-      widget.wrapper.style.display = 'none'
-    }
-
-    // Hide parent container if it exists
-    if (widget.container) {
-      widget.container.style.display = 'none'
-    }
-  })
-}
-
-// Register extension for Get Image File By Index
-app.registerExtension({
-  name: 'CCTech.GetImageFileByIndex',
-  async beforeRegisterNodeDef(nodeType, nodeData, app) {
-    if (nodeData.name === 'Get Image File By Index') {
-      const onNodeCreated = nodeType.prototype.onNodeCreated
-
-      nodeType.prototype.onNodeCreated = async function () {
-        const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined
-
-        // Create the preview widget
-        const widget = createImagePreviewWidget(this, nodeData.name)
-
-        // Override onExecuted to handle the image display
-        const originalOnExecuted = this.onExecuted
-        this.onExecuted = function (message) {
-          originalOnExecuted?.apply(this, arguments)
-
-          // Debug the message structure
-          console.log('Image node message:', message)
-
-          // Check if we have images in the output
-          if (message.text.length > 0) {
-            this.updateImage(message.images, message.text)
-          }
-        }
-
-        // Hide default image widgets after a delay
-        setTimeout(() => {
-          hideDefaultImageWidgets(this)
-          this.setSize(this.computeSize())
-        }, 10)
-
-        return r
-      }
-
-      // Handle serialization/deserialization
-      const onConfigure = nodeType.prototype.onConfigure
-      nodeType.prototype.onConfigure = function (info) {
-        onConfigure?.apply(this, arguments)
-
-        // Re-hide widgets and restore state after loading
-        setTimeout(() => {
-          hideDefaultImageWidgets(this)
-
-          if (this.imgs && this.imgs.length > 0) {
-            const img = this.imgs[0]
-            if (img && img.src) {
-              this.imageElement.src = img.src
-              this.imageElement.style.display = 'block'
-              this.placeholderElement.style.display = 'none'
-            }
-          }
-        }, 100)
-      }
-    }
-  },
-})
+const PREVIEW_NODES = [
+  'Random Image Path',
+  'Random Video Path',
+  'Get Image File By Index',
+  'Get Video File By Index',
+]
 
 app.registerExtension({
-  name: 'CCTech.RandomImagePath',
+  name: 'CCTech.GetRandomFile.Preview',
   async beforeRegisterNodeDef(nodeType, nodeData, app) {
-    if (nodeData.name === 'Random Image Path') {
-      const onNodeCreated = nodeType.prototype.onNodeCreated
+    if (!PREVIEW_NODES.includes(nodeData.name)) return
 
-      nodeType.prototype.onNodeCreated = async function () {
-        const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined
+    const onNodeCreated = nodeType.prototype.onNodeCreated
+    nodeType.prototype.onNodeCreated = async function () {
+      const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined
+      createMediaPreviewWidget(this)
 
-        // Create the preview widget
-        const widget = createImagePreviewWidget(this, nodeData.name)
-
-        // Override onExecuted to handle the image display
-        const originalOnExecuted = this.onExecuted
-        this.onExecuted = function (message) {
-          originalOnExecuted?.apply(this, arguments)
-
-          // Debug the message structure
-          console.log('Image node message:', message)
-
-          // Check if we have images in the output
-          if (message.text.length > 0) {
-            this.updateImage(message.images, message.text)
-          }
-        }
-
-        // Hide default image widgets after a delay
-        setTimeout(() => {
-          hideDefaultImageWidgets(this)
-          this.setSize(this.computeSize())
-        }, 10)
-
-        return r
+      const originalOnExecuted = this.onExecuted
+      this.onExecuted = function (message) {
+        originalOnExecuted?.apply(this, arguments)
+        this.updateMediaPreview(message?.text)
       }
 
-      // Handle serialization/deserialization
-      const onConfigure = nodeType.prototype.onConfigure
-      nodeType.prototype.onConfigure = function (info) {
-        onConfigure?.apply(this, arguments)
-
-        // Re-hide widgets and restore state after loading
-        setTimeout(() => {
-          hideDefaultImageWidgets(this)
-
-          if (this.imgs && this.imgs.length > 0) {
-            const img = this.imgs[0]
-            if (img && img.src) {
-              this.imageElement.src = img.src
-              this.imageElement.style.display = 'block'
-              this.placeholderElement.style.display = 'none'
-            }
-          }
-        }, 100)
-      }
-    }
-  },
-})
-
-// Register extension for Get Video File By Index
-app.registerExtension({
-  name: 'CCTech.GetVideoFileByIndex',
-  async beforeRegisterNodeDef(nodeType, nodeData, app) {
-    if (nodeData.name === 'Get Video File By Index') {
-      const onNodeCreated = nodeType.prototype.onNodeCreated
-
-      nodeType.prototype.onNodeCreated = async function () {
-        const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined
-
-        // Create the preview widget
-        const widget = createImagePreviewWidget(this, nodeData.name)
-
-        // Override onExecuted to handle the video preview display
-        const originalOnExecuted = this.onExecuted
-        this.onExecuted = function (message) {
-          originalOnExecuted?.apply(this, arguments)
-
-          // Debug the message structure
-          console.log('Video node message:', message)
-
-          // Check if we have images in the output
-          if (message.text.length > 0) {
-            this.updateImage(message.images, message.text)
-          }
-        }
-
-        // Hide default image widgets after a delay
-        setTimeout(() => {
-          hideDefaultImageWidgets(this)
-          this.setSize(this.computeSize())
-        }, 10)
-
-        return r
-      }
-
-      // Handle serialization/deserialization
-      const onConfigure = nodeType.prototype.onConfigure
-      nodeType.prototype.onConfigure = function (info) {
-        onConfigure?.apply(this, arguments)
-
-        // Re-hide widgets after loading
-        setTimeout(() => {
-          hideDefaultImageWidgets(this)
-        }, 100)
-      }
-    }
-  },
-})
-
-app.registerExtension({
-  name: 'CCTech.RandomVideoPath',
-  async beforeRegisterNodeDef(nodeType, nodeData, app) {
-    if (nodeData.name === 'Random Video Path') {
-      const onNodeCreated = nodeType.prototype.onNodeCreated
-
-      nodeType.prototype.onNodeCreated = async function () {
-        const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined
-
-        // Create the preview widget
-        const widget = createImagePreviewWidget(this, nodeData.name)
-
-        // Override onExecuted to handle the video preview display
-        const originalOnExecuted = this.onExecuted
-        this.onExecuted = function (message) {
-          originalOnExecuted?.apply(this, arguments)
-
-          // Debug the message structure
-          console.log('Video node message:', message)
-
-          // Check if we have images in the output
-          if (message.text.length > 0) {
-            this.updateImage(message.images, message.text)
-          }
-        }
-
-        // Hide default image widgets after a delay
-        setTimeout(() => {
-          hideDefaultImageWidgets(this)
-          this.setSize(this.computeSize())
-        }, 10)
-
-        return r
-      }
-
-      // Handle serialization/deserialization
-      const onConfigure = nodeType.prototype.onConfigure
-      nodeType.prototype.onConfigure = function (info) {
-        onConfigure?.apply(this, arguments)
-
-        // Re-hide widgets after loading
-        setTimeout(() => {
-          hideDefaultImageWidgets(this)
-        }, 100)
-      }
+      setTimeout(() => this.setSize(this.computeSize()), 10)
+      return r
     }
   },
 })
