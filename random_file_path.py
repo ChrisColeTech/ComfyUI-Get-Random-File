@@ -47,19 +47,60 @@ def _load_image_outputs(path):
     return torch.from_numpy(image_np)[None,], mask
 
 
-def _load_video_outputs(path):
-    """(VIDEO, IMAGE [T,H,W,C], AUDIO, fps, frame_count) via comfy-core's own
-    VideoFromFile - the SAME object core LoadVideo outputs, so everything
-    downstream of a LoadVideo works identically downstream of these nodes.
-    The old homemade cv2 FrameGenerator (a python list of per-frame tensors,
-    not a valid IMAGE batch, with no audio and no timing) is gone."""
+def _probe_video_meta(path):
+    """(fps, frame_count, width, height) from the container header only - no
+    frame decoding. Used when split_components is off so fps/frame_count and
+    the preview info line stay real without paying for a full decode."""
+    import av
+    with av.open(path) as container:
+        stream = container.streams.video[0]
+        fps = float(stream.average_rate or 0)
+        frames = int(stream.frames or 0)
+        if not frames and fps and container.duration:
+            frames = int(round(container.duration / av.time_base * fps))
+        cc = stream.codec_context
+        return fps, frames, int(cc.width), int(cc.height)
+
+
+def _load_video_outputs(path, split_components=True):
+    """(VIDEO, IMAGE [T,H,W,C]|None, AUDIO|None, fps, frame_count, w, h) via
+    comfy-core's own VideoFromFile - the SAME object core LoadVideo outputs,
+    so everything downstream of a LoadVideo works identically downstream of
+    these nodes. The old homemade cv2 FrameGenerator (a python list of
+    per-frame tensors, not a valid IMAGE batch, with no audio and no timing)
+    is gone.
+
+    split_components=False skips the frame/audio decode entirely (the
+    expensive part): images/audio come back None (leave those outputs
+    unwired), while video/filename stay fully functional and
+    fps/frame_count/resolution come from a header-only probe."""
     video = VideoFromFile(path)
+    if not split_components:
+        fps, frame_count, w, h = _probe_video_meta(path)
+        return video, None, None, fps, frame_count, w, h
     components = video.get_components()
     images = components.images
     audio = components.audio  # None when the file has no audio track
     fps = float(components.frame_rate)
     frame_count = int(images.shape[0])
-    return video, images, audio, fps, frame_count
+    return video, images, audio, fps, frame_count, int(images.shape[2]), int(images.shape[1])
+
+
+# keep_current state: {unique_id: last picked path} - the "bypass the
+# randomizer" switch. Per node instance, held for the process lifetime.
+_HELD_PICKS = {}
+
+
+def _pick(files, unique_id, keep_current):
+    """random.choice, unless keep_current holds the previous pick (re-rolls
+    only if the held file disappeared or the switch is off)."""
+    if keep_current:
+        held = _HELD_PICKS.get(unique_id)
+        if held is not None and os.path.isfile(held):
+            return held
+    path = random.choice(files)
+    _HELD_PICKS[unique_id] = path
+    return path
 
 
 # ── Preview serving ─────────────────────────────────────────────────────────
@@ -112,6 +153,15 @@ class RandomFilePathNode:
             "required": {
                 "directory_path": ("STRING", {"default": ""}),
             },
+            "optional": {
+                "keep_current": ("BOOLEAN", {"default": False,
+                    "tooltip": "On = keep returning the file picked on the last run "
+                               "instead of re-rolling (per node; re-rolls only if that "
+                               "file no longer exists or this is switched off)."}),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+            }
         }
 
     @classmethod
@@ -123,9 +173,9 @@ class RandomFilePathNode:
     FUNCTION = "get_random_file_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_file_path(self, directory_path: str):
+    def get_random_file_path(self, directory_path: str, unique_id=None, keep_current=False):
         files = _walk_files(directory_path)
-        return (random.choice(files),)
+        return (_pick(files, unique_id, keep_current),)
 
 
 class RandomImagePathNode:
@@ -136,6 +186,12 @@ class RandomImagePathNode:
         return {
             "required": {
                 "directory_path": ("STRING", {"default": ""}),
+            },
+            "optional": {
+                "keep_current": ("BOOLEAN", {"default": False,
+                    "tooltip": "On = keep returning the file picked on the last run "
+                               "instead of re-rolling (per node; re-rolls only if that "
+                               "file no longer exists or this is switched off)."}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -153,9 +209,9 @@ class RandomImagePathNode:
     FUNCTION = "get_random_image_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_image_path(self, directory_path, unique_id):
+    def get_random_image_path(self, directory_path, unique_id, keep_current=False):
         files = _walk_files(directory_path, image_extensions)
-        path = random.choice(files)
+        path = _pick(files, unique_id, keep_current)
         image_tensor, mask = _load_image_outputs(path)
         token = _register_preview(path)
         h, w = image_tensor.shape[1], image_tensor.shape[2]
@@ -241,6 +297,17 @@ class RandomVideoPathNode:
             "required": {
                 "directory_path": ("STRING", {"default": ""}),
             },
+            "optional": {
+                "keep_current": ("BOOLEAN", {"default": False,
+                    "tooltip": "On = keep returning the file picked on the last run "
+                               "instead of re-rolling (per node; re-rolls only if that "
+                               "file no longer exists or this is switched off)."}),
+                "split_components": ("BOOLEAN", {"default": True,
+                    "tooltip": "Off = skip decoding frames/audio entirely (much faster "
+                               "when you only need the video/filename outputs - they "
+                               "stay fully functional; fps/frame_count come from the "
+                               "container header). Leave images/audio unwired when off."}),
+            },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             }
@@ -259,16 +326,20 @@ class RandomVideoPathNode:
     FUNCTION = "get_random_video_path"
     CATEGORY = "🤖 CCTech/Files"
 
-    def get_random_video_path(self, directory_path, unique_id):
+    def get_random_video_path(self, directory_path, unique_id, keep_current=False,
+                              split_components=True):
         files = _walk_files(directory_path, video_extensions)
-        path = random.choice(files)
-        video, images, audio, fps, frame_count = _load_video_outputs(path)
+        path = _pick(files, unique_id, keep_current)
+        video, images, audio, fps, frame_count, w, h = _load_video_outputs(
+            path, split_components)
         token = _register_preview(path)
 
         duration = frame_count / fps if fps > 0 else 0
-        h, w = images.shape[1], images.shape[2]
         video_info_text = (f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • "
-                           f"{duration:.2f}s" + ("" if audio is not None else " • no audio"))
+                           f"{duration:.2f}s"
+                           + ("" if (audio is not None or not split_components)
+                              else " • no audio")
+                           + ("" if split_components else " • components bypassed"))
         return {
             "ui": {
                 "text": ["video", token, os.path.basename(path), video_info_text],
@@ -295,6 +366,13 @@ class GetVideoFileByIndexNode:
                 "step": ("INT", {"default": 1, "min": 1, "max": 99999, "step": 1}),
                 "directory_path": ("STRING", {"default": ""})
             },
+            "optional": {
+                "split_components": ("BOOLEAN", {"default": True,
+                    "tooltip": "Off = skip decoding frames/audio entirely (much faster "
+                               "when you only need the video/filename outputs - they "
+                               "stay fully functional; fps/frame_count come from the "
+                               "container header). Leave images/audio unwired when off."}),
+            },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             }
@@ -312,18 +390,21 @@ class GetVideoFileByIndexNode:
 
     _advance = GetImageFileByIndexNode._advance
 
-    def get_video_path_by_index(self, directory_path, mode, start, stop, step, unique_id, reset_bool):
+    def get_video_path_by_index(self, directory_path, mode, start, stop, step, unique_id,
+                                reset_bool, split_components=True):
         files = _walk_files(directory_path, video_extensions)
         counter, result = self._advance(unique_id, mode, start, stop, step, reset_bool, len(files))
         path = files[result]
-        video, images, audio, fps, frame_count = _load_video_outputs(path)
+        video, images, audio, fps, frame_count, w, h = _load_video_outputs(
+            path, split_components)
         token = _register_preview(path)
 
         duration = frame_count / fps if fps > 0 else 0
-        h, w = images.shape[1], images.shape[2]
         video_info_text = (f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • "
                            f"{duration:.2f}s • Index: {result} / {len(files) - 1}"
-                           + ("" if audio is not None else " • no audio"))
+                           + ("" if (audio is not None or not split_components)
+                              else " • no audio")
+                           + ("" if split_components else " • components bypassed"))
         return {
             "ui": {
                 "text": ["video", token, os.path.basename(path), video_info_text],
