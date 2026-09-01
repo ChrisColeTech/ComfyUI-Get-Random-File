@@ -418,42 +418,61 @@ class GetVideoFileByIndexNode:
 
 
 class VideoPathLoader:
-    """Load one specific video by path. Same loader, same outputs and the
-    same preview widget as the random/indexed video nodes."""
-    SEARCH_ALIASES = ['load video path', 'video from path', 'video by path']
+    """Load a video by path. video_path may be a file or a folder.
+    randomize ON  = pick a random video from the folder (the file's own
+                    folder when a file is given). Same as Random Video Path.
+    randomize OFF = load exactly the given file (a folder holds the last
+                    pick, like the other nodes).
+    Same loader, outputs and preview widget as the other video nodes."""
+    SEARCH_ALIASES = ['load random video path', 'video from path', 'video by path']
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "video_path": ("STRING", {"default": "", "multiline": False}),
+                "video_path": ("STRING", {"default": "", "multiline": False,
+                    "tooltip": "A video file, or a folder of videos."}),
             },
             "optional": {
+                "randomize": ("BOOLEAN", {"default": True,
+                    "tooltip": "On = pick a random video from the folder every run "
+                               "(the file's folder if you gave a file). "
+                               "Off = load exactly the given file (a folder keeps "
+                               "returning its current pick)."}),
                 "split": ("BOOLEAN", {"default": True,
                     "tooltip": "Off = skip decoding frames/audio entirely (much faster "
                                "when you only need the video/filename outputs - they "
                                "stay fully functional; fps/frame_count come from the "
                                "container header). Leave images/audio unwired when off."}),
             },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+            }
         }
 
     @classmethod
-    def IS_CHANGED(cls, video_path="", **kwargs):
-        try:
-            return os.path.getmtime(video_path)
-        except OSError:
-            return float("NaN")
+    def IS_CHANGED(cls, **kwargs):
+        return float("NaN")
 
     RETURN_TYPES = ("IMAGE", "STRING", "VIDEO", "AUDIO", "FLOAT", "INT")
     RETURN_NAMES = ("images", "filename", "video", "audio", "fps", "frame_count")
     FUNCTION = "load_video"
     CATEGORY = "🤖 CCTech/Files"
 
-    def load_video(self, video_path, split=True):
-        video_path = video_path.strip().strip('"')
-        if not os.path.isfile(video_path):
+    def load_video(self, video_path, unique_id=None, randomize=True, split=True):
+        video_path = os.path.abspath(video_path.strip().strip('"'))
+        if os.path.isdir(video_path):
+            files = _walk_files(video_path, video_extensions)
+            path = _pick(files, unique_id, randomize)
+        elif os.path.isfile(video_path):
+            if randomize:
+                files = _walk_files(os.path.dirname(video_path), video_extensions)
+                path = _pick(files, unique_id, randomize)
+            else:
+                path = video_path
+        else:
             raise FileNotFoundError(f"Video path not found: {video_path}")
-        path = os.path.abspath(video_path)
+
         video, images, audio, fps, frame_count, w, h = _load_video_outputs(
             path, split)
         token = _register_preview(path)
@@ -487,5 +506,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Random File Path": "Random File Path 🎲",
     "Get Image File By Index": "Get Image File By Index 🖼️",
     "Get Video File By Index": "Get Video File By Index ▶️",
-    "VideoPathLoader": "Load Video (Path) ▶️",
+    "VideoPathLoader": "Load Random Video (Path) 🎲",
 }
