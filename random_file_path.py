@@ -436,8 +436,8 @@ def _video_result(path, split, extra_info=""):
 
 
 class VideoPathLoader:
-    """Load exactly one video file by path. No switches - always decodes
-    frames and audio. Same outputs and preview as the other video nodes."""
+    """Load one video file by path and output it as a VIDEO. Nothing is
+    decoded - the file is wrapped as-is, same object core LoadVideo emits."""
     SEARCH_ALIASES = ['load video path', 'video from path', 'video by path']
 
     @classmethod
@@ -456,8 +456,8 @@ class VideoPathLoader:
         except OSError:
             return float("NaN")
 
-    RETURN_TYPES = ("IMAGE", "STRING", "VIDEO", "AUDIO", "FLOAT", "INT")
-    RETURN_NAMES = ("images", "filename", "video", "audio", "fps", "frame_count")
+    RETURN_TYPES = ("VIDEO",)
+    RETURN_NAMES = ("video",)
     FUNCTION = "load_video"
     CATEGORY = "🤖 CCTech/Files"
 
@@ -465,7 +465,17 @@ class VideoPathLoader:
         video_path = os.path.abspath(video_path.strip().strip('"'))
         if not os.path.isfile(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
-        return _video_result(video_path, split=True)
+        video = VideoFromFile(video_path)
+        fps, frame_count, w, h = _probe_video_meta(video_path)
+        token = _register_preview(video_path)
+        duration = frame_count / fps if fps > 0 else 0
+        info = f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • {duration:.2f}s"
+        return {
+            "ui": {
+                "text": ["video", token, os.path.basename(video_path), info],
+            },
+            "result": (video,),
+        }
 
 
 class RandomVideoPathLoader:
