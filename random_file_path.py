@@ -418,48 +418,58 @@ class GetVideoFileByIndexNode:
 
 
 class VideoPathLoader:
+    """Load one specific video by path. Same loader, same outputs and the
+    same preview widget as the random/indexed video nodes."""
+    SEARCH_ALIASES = ['load video path', 'video from path', 'video by path']
+
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "video_path": ("STRING", {"default": "", "multiline": False}),
             },
+            "optional": {
+                "split": ("BOOLEAN", {"default": True,
+                    "tooltip": "Off = skip decoding frames/audio entirely (much faster "
+                               "when you only need the video/filename outputs - they "
+                               "stay fully functional; fps/frame_count come from the "
+                               "container header). Leave images/audio unwired when off."}),
+            },
         }
 
-    # Return the frames as an IMAGE tensor (B, H, W, C) and a string path for the UI preview
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("IMAGE", "video_path")
+    @classmethod
+    def IS_CHANGED(cls, video_path="", **kwargs):
+        try:
+            return os.path.getmtime(video_path)
+        except OSError:
+            return float("NaN")
+
+    RETURN_TYPES = ("IMAGE", "STRING", "VIDEO", "AUDIO", "FLOAT", "INT")
+    RETURN_NAMES = ("images", "filename", "video", "audio", "fps", "frame_count")
     FUNCTION = "load_video"
     CATEGORY = "🤖 CCTech/Files"
-    OUTPUT_NODE = True
 
-    def load_video(self, video_path):
-        if not os.path.exists(video_path):
+    def load_video(self, video_path, split=True):
+        video_path = video_path.strip().strip('"')
+        if not os.path.isfile(video_path):
             raise FileNotFoundError(f"Video path not found: {video_path}")
+        path = os.path.abspath(video_path)
+        video, images, audio, fps, frame_count, w, h = _load_video_outputs(
+            path, split)
+        token = _register_preview(path)
 
-        cap = cv2.VideoCapture(video_path)
-        frames = []
-
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            # Convert BGR (OpenCV standard) to RGB
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            # Normalize to 0.0 - 1.0 float32 format required by ComfyUI
-            frame = frame.astype(np.float32) / 255.0
-            frames.append(frame)
-
-        cap.release()
-
-        if len(frames) == 0:
-            raise ValueError(f"No frames could be loaded from: {video_path}")
-
-        # Stack into a batch tensor: [batch, height, width, channels]
-        video_tensor = torch.from_numpy(np.stack(frames, axis=0))
-        
-        # Return both the tensor for processing and the absolute path for the JS player
-        return (video_tensor, os.path.abspath(video_path))
+        duration = frame_count / fps if fps > 0 else 0
+        video_info_text = (f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • "
+                           f"{duration:.2f}s"
+                           + ("" if (audio is not None or not split)
+                              else " • no audio")
+                           + ("" if split else " • components bypassed"))
+        return {
+            "ui": {
+                "text": ["video", token, os.path.basename(path), video_info_text],
+            },
+            "result": (images, path, video, audio, fps, frame_count),
+        }
 
 
 NODE_CLASS_MAPPINGS = {

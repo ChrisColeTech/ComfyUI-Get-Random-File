@@ -126,6 +126,7 @@ const PREVIEW_NODES = [
   'Random Video Path',
   'Get Image File By Index',
   'Get Video File By Index',
+  'VideoPathLoader',
 ]
 
 app.registerExtension({
