@@ -417,12 +417,58 @@ class GetVideoFileByIndexNode:
         }
 
 
+class VideoPathLoader:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "video_path": ("STRING", {"default": "", "multiline": False}),
+            },
+        }
+
+    # Return the frames as an IMAGE tensor (B, H, W, C) and a string path for the UI preview
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("IMAGE", "video_path")
+    FUNCTION = "load_video"
+    CATEGORY = "🤖 CCTech/Files"
+    OUTPUT_NODE = True
+
+    def load_video(self, video_path):
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video path not found: {video_path}")
+
+        cap = cv2.VideoCapture(video_path)
+        frames = []
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            # Convert BGR (OpenCV standard) to RGB
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Normalize to 0.0 - 1.0 float32 format required by ComfyUI
+            frame = frame.astype(np.float32) / 255.0
+            frames.append(frame)
+
+        cap.release()
+
+        if len(frames) == 0:
+            raise ValueError(f"No frames could be loaded from: {video_path}")
+
+        # Stack into a batch tensor: [batch, height, width, channels]
+        video_tensor = torch.from_numpy(np.stack(frames, axis=0))
+        
+        # Return both the tensor for processing and the absolute path for the JS player
+        return (video_tensor, os.path.abspath(video_path))
+
+
 NODE_CLASS_MAPPINGS = {
     "Random Video Path": RandomVideoPathNode,
     "Random Image Path": RandomImagePathNode,
     "Random File Path": RandomFilePathNode,
     "Get Image File By Index": GetImageFileByIndexNode,
     "Get Video File By Index": GetVideoFileByIndexNode,
+    "VideoPathLoader": VideoPathLoader
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -431,4 +477,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Random File Path": "Random File Path 🎲",
     "Get Image File By Index": "Get Image File By Index 🖼️",
     "Get Video File By Index": "Get Video File By Index ▶️",
+    "VideoPathLoader": "Load Video (Path) ▶️",
 }
