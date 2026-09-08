@@ -9,6 +9,8 @@ import hashlib
 
 from comfy_api.input_impl import VideoFromFile
 
+from .prompt_metadata import prompts_from_image_file
+
 
 video_extensions = ('webm', 'mp4', 'mkv', 'gif')
 image_extensions = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
@@ -205,9 +207,11 @@ class RandomImagePathNode:
         return float("NaN")
 
     # image/filename keep their original slots so existing workflows keep
-    # working; mask is appended (core LoadImage parity).
-    RETURN_TYPES = ("IMAGE", "STRING", "MASK")
-    RETURN_NAMES = ("image", "filename", "mask")
+    # working; mask is appended (core LoadImage parity), then the positive/
+    # negative prompts embedded in the picked image's ComfyUI metadata
+    # (empty strings when the file has none).
+    RETURN_TYPES = ("IMAGE", "STRING", "MASK", "STRING", "STRING")
+    RETURN_NAMES = ("image", "filename", "mask", "positive_prompt", "negative_prompt")
     FUNCTION = "get_random_image_path"
     CATEGORY = "🤖 CCTech/Files"
 
@@ -215,13 +219,14 @@ class RandomImagePathNode:
         files = _walk_files(directory_path, image_extensions)
         path = _pick(files, unique_id, randomize)
         image_tensor, mask = _load_image_outputs(path)
+        positive_prompt, negative_prompt = prompts_from_image_file(path)
         token = _register_preview(path)
         h, w = image_tensor.shape[1], image_tensor.shape[2]
         return {
             "ui": {
                 "text": ["image", token, os.path.basename(path), f"{w}x{h}"],
             },
-            "result": (image_tensor, path, mask),
+            "result": (image_tensor, path, mask, positive_prompt, negative_prompt),
         }
 
 
@@ -252,8 +257,9 @@ class GetImageFileByIndexNode:
     def IS_CHANGED(cls, **kwargs):
         return float("NaN")
 
-    RETURN_TYPES = ("IMAGE", "STRING", "NUMBER", "INT", "MASK")
-    RETURN_NAMES = ("image", "filename", "index", "int", "mask")
+    RETURN_TYPES = ("IMAGE", "STRING", "NUMBER", "INT", "MASK", "STRING", "STRING")
+    RETURN_NAMES = ("image", "filename", "index", "int", "mask",
+                    "positive_prompt", "negative_prompt")
     FUNCTION = "get_image_path_by_index"
     CATEGORY = "🤖 CCTech/Files"
     OUTPUT_NODE = True
@@ -279,6 +285,7 @@ class GetImageFileByIndexNode:
         counter, result = self._advance(unique_id, mode, start, stop, step, reset_bool, len(files))
         path = files[result]
         image_tensor, mask = _load_image_outputs(path)
+        positive_prompt, negative_prompt = prompts_from_image_file(path)
         token = _register_preview(path)
         h, w = image_tensor.shape[1], image_tensor.shape[2]
         info = f"{w}x{h} | Index: {result} / {len(files) - 1}"
@@ -286,7 +293,8 @@ class GetImageFileByIndexNode:
             "ui": {
                 "text": ["image", token, os.path.basename(path), info],
             },
-            "result": (image_tensor, path, float(counter), int(counter), mask),
+            "result": (image_tensor, path, float(counter), int(counter), mask,
+                       positive_prompt, negative_prompt),
         }
 
 
