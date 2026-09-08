@@ -1,8 +1,14 @@
 from .random_file_path import (NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS,
                                register_preview_route)
+from .save_remote import (NODE_CLASS_MAPPINGS as _SAVE_MAPPINGS,
+                          NODE_DISPLAY_NAME_MAPPINGS as _SAVE_DISPLAY,
+                          register_config_routes)
 import random
 
 register_preview_route()
+register_config_routes()
+NODE_CLASS_MAPPINGS.update(_SAVE_MAPPINGS)
+NODE_DISPLAY_NAME_MAPPINGS.update(_SAVE_DISPLAY)
 
 tech_rambling = [
     "Zap zap zoom!", "Sproing-a-ling!", "Flux capacitor charged!", "Circuit party started!",
