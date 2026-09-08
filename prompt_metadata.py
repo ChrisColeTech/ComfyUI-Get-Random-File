@@ -59,6 +59,32 @@ _ENCODE_TEXT_KEYS = {
 }
 
 
+def _echoed_text(inputs):
+    """Text a display/echo node recorded back into indexed widgets, or "".
+
+    ComfyUI display nodes (ShowText, Preview Text, Display Any, ... - every
+    pack ships one) take the string on a link and write the *executed* value
+    back into ``text_0``/``text_1``/... output widgets, which is how it ends
+    up in the saved metadata. Matching on that widget shape rather than on a
+    list of class names covers packs this module has never heard of.
+
+    That written-back value is often the ONLY copy of the prompt in the
+    graph: when the text comes from a file reader or a wildcard node, the
+    upstream inputs hold a path or a template, and following the link
+    resolves to nothing.
+    """
+    indexed = sorted(
+        (int(key.partition("_")[2]), key)
+        for key in inputs
+        if key.startswith("text_") and key.partition("_")[2].isdigit()
+    )
+    parts = [
+        inputs[key] for _, key in indexed
+        if isinstance(inputs[key], str) and inputs[key].strip()
+    ]
+    return "\n".join(parts)
+
+
 def prompts_from_image_file(path):
     """(positive_prompt, negative_prompt) embedded in an image file's ComfyUI
     metadata; ("", "") when the file has none (or can't be read)."""
@@ -145,7 +171,7 @@ def extract_prompts(workflow):
             elif not positive and node_id not in pos_tried and node_id not in neg_tried:
                 positive = text
 
-    return positive, negative
+    return positive.strip(), negative.strip()
 
 
 def _text_from_node_id(node_id, visited, workflow, negative=False):
@@ -185,24 +211,34 @@ def _text_from_node_id(node_id, visited, workflow, negative=False):
         delimiter = inputs.get("delimiter")
         delimiter = delimiter if isinstance(delimiter, str) else ""
         parts = []
-        for key in ("text_a", "text_b", "text_c", "text_d"):
+        for key in ("text_a", "text_b", "text_c", "text_d",
+                    "string_a", "string_b", "string_c", "string_d"):
             value = inputs.get(key)
             if _is_link(value):
                 text = _text_from_node_id(value[0], visited, workflow, negative)
                 if text:
                     parts.append(text)
-            elif isinstance(value, str) and value:
+            elif isinstance(value, str) and value.strip():
+                # Whitespace-only widget parts (a bare "\n\n" separator box)
+                # are spacing, not content - dropping them keeps the joined
+                # result from starting/ending with blank lines.
                 parts.append(value)
-        if not parts:
-            for key in ("string_a", "string_b"):
-                value = inputs.get(key)
-                if _is_link(value):
-                    text = _text_from_node_id(value[0], visited, workflow, negative)
-                    if text:
-                        parts.append(text)
-                elif isinstance(value, str) and value:
-                    parts.append(value)
         return delimiter.join(parts)
+
+    if cls in ("StringReplace", "String Replace"):
+        # find/replace are configuration, never the prompt - resolve only the
+        # subject string, and return "" rather than let the generic scan below
+        # mistake the replacement text for the prompt.
+        value = inputs.get("string")
+        if _is_link(value):
+            value = _text_from_node_id(value[0], visited, workflow, negative)
+        if not isinstance(value, str) or not value:
+            return ""
+        find = inputs.get("find")
+        replace = inputs.get("replace")
+        if isinstance(find, str) and find and isinstance(replace, str):
+            value = value.replace(find, replace)
+        return value
 
     if cls == "Text Multiline":
         value = inputs.get("text")
@@ -239,17 +275,93 @@ def _text_from_node_id(node_id, visited, workflow, negative=False):
                 and isinstance(values[0], str)):
             return values[0]
 
+    echoed = _echoed_text(inputs)
+    if echoed:
+        return echoed
+
     for key in (("negative_prompt", "prompt", "text") if negative
                 else ("prompt", "text")):
         if key in inputs:
             value = inputs[key]
             if _is_link(value):
-                return _text_from_node_id(value[0], visited, workflow, negative)
-            if isinstance(value, str):
+                # A link that resolves to nothing (a runtime-only source) is
+                # not an answer - keep trying the node's other keys.
+                text = _text_from_node_id(value[0], visited, workflow, negative)
+                if text:
+                    return text
+            elif isinstance(value, str):
                 return value
     if _is_link(inputs.get("conditioning")):
         return _text_from_node_id(inputs["conditioning"][0], visited, workflow, negative)
 
+    return _text_from_unknown_node(inputs, visited, workflow, negative)
+
+
+# Keys that never hold prompt text - loader widgets, file pickers, mode
+# selectors. A wildcard "any string" scan must skip these or a filename
+# like "ComfyUI_00027.png" would leak into the extracted prompt.
+_BLOCKED_KEY_SUFFIXES = ("_name", "_path", "_file", "_dir")
+_BLOCKED_KEYS = frozenset({
+    "image", "video", "audio", "filename", "filename_prefix", "prefix",
+    "delimiter", "mode", "type", "format", "extension", "device", "seed",
+    "source", "destination", "category", "ckpt_name", "lora_name",
+    # Find/replace and template configuration: prose-shaped, but it is the
+    # rule applied to a prompt, never the prompt.
+    "find", "replace", "search", "pattern", "regex", "separator", "suffix",
+    "path", "directory", "directory_path", "folder",
+})
+
+# Text-carrying key prefixes, most-explicit first.
+_TEXTISH_PREFIXES = ("text", "prompt", "string", "wildcard", "populated", "caption", "description")
+
+
+def _key_rank(key):
+    if key in ("prompt", "text", "negative_prompt"):
+        return 0
+    if key.startswith(_TEXTISH_PREFIXES):
+        return 1
+    return 2
+
+
+def _is_blocked_key(key):
+    return key in _BLOCKED_KEYS or key.endswith(_BLOCKED_KEY_SUFFIXES)
+
+
+def _looks_like_prompt_text(value):
+    text = value.strip()
+    if len(text) < 12:
+        return False
+    return " " in text or "\n" in text
+
+
+def _text_from_unknown_node(inputs, visited, workflow, negative):
+    """Generic fallback for node classes this module does not know.
+
+    Any pack can define a display/holder/wildcard/picker node; instead of
+    special-casing them, scan the node's inputs: textish-named keys first
+    (text*, prompt*, string*, wildcard*, populated*...), following links
+    and reading strings; as a last resort take the longest prose-like
+    string among unblocked keys (whitespace-containing, >= 12 chars) so
+    short mode/filename widgets never win.
+    """
+    ranked = sorted(inputs.keys(), key=_key_rank)
+    for key in ranked:
+        if _key_rank(key) == 2 or _is_blocked_key(key):
+            continue
+        value = inputs.get(key)
+        if _is_link(value):
+            text = _text_from_node_id(value[0], visited, workflow, negative)
+            if text:
+                return text
+        elif isinstance(value, str) and value.strip():
+            return value
+    candidates = [
+        value for key, value in inputs.items()
+        if isinstance(value, str) and not _is_blocked_key(key)
+        and _looks_like_prompt_text(value)
+    ]
+    if candidates:
+        return max(candidates, key=len)
     return ""
 
 
