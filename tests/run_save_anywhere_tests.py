@@ -80,7 +80,12 @@ def test_image_node():
     assert names == ["ComfyUI_00001_.png", "ComfyUI_00002_.png"], names
     assert out["result"][0] is batch  # passthrough, stock-style
     assert len(out["result"][1].splitlines()) == 2
-    assert out["ui"]["text"][4] == out["result"][1].splitlines()  # gallery: whole batch
+    # ui.previews is the gallery contract: one dict per saved file. ComfyUI
+    # flattens ui[k] across executions, so a list of dicts is what the widget
+    # actually sees for a batch of 2 (nested lists inside ui.text do not survive).
+    previews = out["ui"]["previews"]
+    assert [p["title"] for p in previews] == names, previews
+    assert all(p["kind"] == "image" and p["path"].endswith(p["title"]) for p in previews)
 
     # counter never overwrites: second run continues the sequence
     node.save(batch, str(folder), "ComfyUI")
@@ -125,12 +130,15 @@ def test_video_node():
     folder = ART / "vid"
     video = _FakeVideo()
 
-    node.save(video, str(folder), "clip", prompt={"1": {"class_type": "CreateVideo"}})
+    out = node.save(video, str(folder), "clip", prompt={"1": {"class_type": "CreateVideo"}})
     call = video.calls[-1]
     assert call["path"].endswith("clip_00001_.mp4"), call["path"]
     assert call["codec"] == "auto"
     assert call["crf"] is None
     assert call["metadata"]["prompt"] == {"1": {"class_type": "CreateVideo"}}
+    assert len(out["ui"]["previews"]) == 1
+    assert out["ui"]["previews"][0]["kind"] == "video"
+    assert out["ui"]["previews"][0]["title"] == "clip_00001_.mp4"
 
     # counter advances, crf >= 0 forces the value through
     node.save(video, str(folder), "clip", codec="h264", crf=20)
@@ -145,6 +153,20 @@ def test_video_node():
         raise AssertionError("empty folder_path should raise")
     except RuntimeError as e:
         assert "destination folder" in str(e)
+
+
+def test_comfy_flattens_preview_cells_across_executions():
+    """ComfyUI's get_output_from_returns concatenates ui[k]. Two video
+    executions (a batch of 2) must yield TWO preview cells, not a smashed
+    text tuple that only shows the first file."""
+    node = save_anywhere.SaveVideoToFolder()
+    folder = ART / "vid_batch"
+    ua = node.save(_FakeVideo(), str(folder), "pair")["ui"]
+    ub = node.save(_FakeVideo(), str(folder), "pair")["ui"]
+    merged = {k: [y for x in (ua, ub) for y in x[k]] for k in ua}
+    assert [p["title"] for p in merged["previews"]] == [
+        "pair_00001_.mp4", "pair_00002_.mp4"
+    ], merged["previews"]
 
 
 def test_counter_helper():
@@ -163,7 +185,8 @@ def test_counter_helper():
 def main() -> int:
     if ART.exists():
         shutil.rmtree(ART)
-    tests = [test_image_node, test_video_node, test_counter_helper]
+    tests = [test_image_node, test_video_node,
+             test_comfy_flattens_preview_cells_across_executions, test_counter_helper]
     failed = 0
     for test in tests:
         try:

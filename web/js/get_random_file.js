@@ -3,51 +3,98 @@ import { app } from '../../../scripts/app.js'
 import { $el } from '../../../scripts/ui.js'
 import { addStylesheet } from '../../../scripts/utils.js'
 
-// Add custom styles
 addStylesheet('css/styles.css', import.meta.url)
 
-// One preview per node: a single DOM widget holding either a playable
-// <video> (VHS-style, streamed from this pack's own view endpoint with
-// Range support so seeking works) or an <img>. The backend no longer sends
-// ui.images at all, so comfy's built-in canvas preview never draws a second
-// copy - that was the old duplication.
+// Preview widget for the random-file + save-anywhere nodes.
 //
-// ui.text schema from the backend: [kind, path, title, info, paths?]
-//   kind  - "video" | "image"
-//   path  - absolute file path for /cctech_random_file/view
-//   title - filename
-//   info  - resolution / frames / fps / duration / index line
-//   paths - optional: every file of a batch (save nodes) - enables gallery nav
+// ComfyUI flattens every ui[k] across executions:
+//   {k: [y for x in uis for y in x[k]]}
+// so a LIST OF DICTS (`ui.previews`) is the only shape that survives both
+// a batched IMAGE (one execution, N dicts) and a list-wrapped VIDEO
+// (N executions, one dict each). Nested path lists inside `ui.text` get
+// smashed — that's why a batch of 2 only showed the first file.
+//
+// All items render in a grid (stock Save Image behaviour), not a 1-up carousel.
+
+function viewUrl(path) {
+  return api.apiURL(`/cctech_random_file/view?path=${encodeURIComponent(path)}`)
+}
+
+function baseName(p) {
+  const parts = String(p).split(/[\\/]/)
+  return parts[parts.length - 1] || p
+}
+
+function parsePreviewMessage(message) {
+  if (Array.isArray(message?.previews) && message.previews.length) {
+    return message.previews.filter((p) => p && p.path)
+  }
+  const text = message?.text
+  if (!text || !text.length) return []
+
+  // save-remote / list-of-rows: [["image", path, title, info], ...]
+  if (Array.isArray(text[0])) {
+    return text
+      .map((row) => ({
+        kind: row[0],
+        path: row[1],
+        title: row[2] || baseName(row[1]),
+        info: row[3],
+      }))
+      .filter((p) => p.path)
+  }
+
+  // 1.7.1 save-anywhere: 5th element is the path list
+  if (Array.isArray(text[4]) && text[4].length) {
+    const kind = text[0]
+    const info = text[3]
+    return text[4].map((path) => ({
+      kind,
+      path,
+      title: baseName(path),
+      info,
+    }))
+  }
+
+  // flattened repeating 4-tuples from N executions of the old 4-tuple schema
+  if (
+    text.length >= 8 &&
+    (text[0] === 'image' || text[0] === 'video') &&
+    (text[4] === 'image' || text[4] === 'video')
+  ) {
+    const items = []
+    for (let i = 0; i + 3 < text.length; i += 4) {
+      if (text[i] !== 'image' && text[i] !== 'video') break
+      items.push({
+        kind: text[i],
+        path: text[i + 1],
+        title: text[i + 2] || baseName(text[i + 1]),
+        info: text[i + 3],
+      })
+    }
+    return items.filter((p) => p.path)
+  }
+
+  if (text.length >= 4 && text[1]) {
+    return [
+      {
+        kind: text[0],
+        path: text[1],
+        title: text[2] || baseName(text[1]),
+        info: text[3],
+      },
+    ]
+  }
+  return []
+}
 
 function createMediaPreviewWidget(node) {
   const container = $el('div', {
-    style: { width: '100%', maxHeight: '600px' },
+    style: { width: '100%' },
   })
 
   const mediaWrapper = $el('div', {
-    style: { width: '100%', maxHeight: '400px' },
-  })
-
-  const videoElement = $el('video', {
-    style: {
-      maxWidth: '100%',
-      objectFit: 'contain',
-      borderRadius: '4px',
-      display: 'none',
-    },
-    controls: true,
-    muted: true,
-    loop: true,
-    autoplay: true,
-  })
-
-  const imgElement = $el('img', {
-    style: {
-      maxWidth: '100%',
-      objectFit: 'contain',
-      borderRadius: '4px',
-      display: 'none',
-    },
+    style: { width: '100%' },
   })
 
   const placeholder = $el('div', {
@@ -55,127 +102,105 @@ function createMediaPreviewWidget(node) {
     textContent: 'Nothing selected yet - run the workflow',
   })
 
-  const titleText = $el('div', {
-    style: {
-      color: '#aaa',
-      fontSize: '14px',
-      fontWeight: 'bold',
-      textAlign: 'center',
-      marginTop: '8px',
-      display: 'none',
-    },
-  })
-
   const infoText = $el('div', {
     style: {
       color: '#888',
       fontSize: '12px',
       textAlign: 'center',
-      marginTop: '5px',
+      marginTop: '6px',
       display: 'none',
     },
   })
 
-  // gallery nav - only drawn when the backend sends a multi-file batch
-  const navBar = $el('div', {
-    style: {
-      display: 'none',
-      justifyContent: 'center',
-      alignItems: 'center',
-      gap: '8px',
-      marginTop: '5px',
-    },
-  })
-  const navButtonStyle = {
-    background: 'transparent',
-    color: '#aaa',
-    border: '1px solid #555',
-    borderRadius: '4px',
-    padding: '2px 12px',
-    fontSize: '14px',
-    cursor: 'pointer',
-    lineHeight: '1.2',
-  }
-  const prevButton = $el('button', { textContent: '‹', style: navButtonStyle })
-  const posText = $el('span', {
-    style: { color: '#888', fontSize: '12px', minWidth: '44px', textAlign: 'center' },
-  })
-  const nextButton = $el('button', { textContent: '›', style: navButtonStyle })
-  navBar.appendChild(prevButton)
-  navBar.appendChild(posText)
-  navBar.appendChild(nextButton)
-
-  mediaWrapper.appendChild(videoElement)
-  mediaWrapper.appendChild(imgElement)
   container.appendChild(mediaWrapper)
   container.appendChild(placeholder)
-  container.appendChild(titleText)
   container.appendChild(infoText)
-  container.appendChild(navBar)
 
-  let gallery = []
-  let galleryIndex = 0
-  let mediaKind = 'image'
+  let lastCount = 0
 
-  const baseName = (p) => {
-    const parts = String(p).split(/[\\/]/)
-    return parts[parts.length - 1] || p
-  }
+  function renderItems(items) {
+    lastCount = items.length
+    mediaWrapper.replaceChildren()
 
-  function showGalleryItem(i) {
-    const path = gallery[i]
-    const url = api.apiURL(
-      `/cctech_random_file/view?path=${encodeURIComponent(path)}`,
-    )
-    if (mediaKind === 'video') {
-      imgElement.style.display = 'none'
-      videoElement.src = url
-      videoElement.style.display = 'block'
-    } else {
-      videoElement.pause?.()
-      videoElement.style.display = 'none'
-      imgElement.src = url
-      imgElement.style.display = 'block'
-    }
-    titleText.textContent = baseName(path)
-    titleText.style.display = 'block'
-    posText.textContent = `${i + 1} / ${gallery.length}`
-    navBar.style.display = gallery.length > 1 ? 'flex' : 'none'
-  }
-
-  function shiftGallery(delta) {
-    if (!gallery.length) return
-    galleryIndex = (galleryIndex + delta + gallery.length) % gallery.length
-    showGalleryItem(galleryIndex)
-  }
-  prevButton.onclick = () => shiftGallery(-1)
-  nextButton.onclick = () => shiftGallery(1)
-
-  const widget = node.addDOMWidget('mediaPreview', 'custom', container)
-
-  node.updateMediaPreview = function (textInfo) {
-    if (!textInfo || textInfo.length < 4 || !textInfo[1]) {
-      videoElement.style.display = 'none'
-      imgElement.style.display = 'none'
-      navBar.style.display = 'none'
-      gallery = []
+    if (!items.length) {
       placeholder.style.display = 'block'
-      titleText.style.display = 'none'
       infoText.style.display = 'none'
       return
     }
-    const [kind, path, title, info, allPaths] = textInfo
-    mediaKind = kind
-    gallery = Array.isArray(allPaths) && allPaths.length ? allPaths : [path]
-    galleryIndex = 0
+
     placeholder.style.display = 'none'
-    infoText.textContent = info || ''
-    infoText.style.display = info ? 'block' : 'none'
-    showGalleryItem(0)
+    const many = items.length > 1
+    mediaWrapper.style.display = 'grid'
+    mediaWrapper.style.gridTemplateColumns = many
+      ? 'repeat(auto-fit, minmax(140px, 1fr))'
+      : '1fr'
+    mediaWrapper.style.gap = '6px'
+    mediaWrapper.style.maxHeight = '560px'
+    mediaWrapper.style.overflow = 'auto'
+
+    for (const item of items) {
+      const cell = $el('div', { style: { textAlign: 'center', minWidth: 0 } })
+      const url = viewUrl(item.path)
+      const mediaStyle = {
+        maxWidth: '100%',
+        maxHeight: many ? '220px' : '360px',
+        objectFit: 'contain',
+        borderRadius: '4px',
+        display: 'block',
+        margin: '0 auto',
+      }
+      if (item.kind === 'video') {
+        cell.appendChild(
+          $el('video', {
+            src: url,
+            controls: true,
+            muted: true,
+            loop: true,
+            autoplay: true,
+            style: mediaStyle,
+          }),
+        )
+      } else {
+        cell.appendChild($el('img', { src: url, style: mediaStyle }))
+      }
+      cell.appendChild(
+        $el('div', {
+          textContent: item.title || '',
+          style: {
+            color: '#aaa',
+            fontSize: '12px',
+            marginTop: '4px',
+            wordBreak: 'break-all',
+          },
+        }),
+      )
+      mediaWrapper.appendChild(cell)
+    }
+
+    const info = items[0]?.info || ''
+    const countNote =
+      items.length > 1 && info && !/\d+\s+files?/.test(info)
+        ? `${info} • ${items.length} files`
+        : info
+    infoText.textContent = countNote
+    infoText.style.display = countNote ? 'block' : 'none'
+  }
+
+  const widget = node.addDOMWidget('mediaPreview', 'custom', container)
+
+  node.updateMediaPreview = function (message) {
+    renderItems(parsePreviewMessage(message || {}))
+    const size = this.computeSize?.()
+    if (size) this.setSize(size)
+    this.setDirtyCanvas?.(true, true)
   }
 
   widget.computeSize = function (width) {
-    return [width, 240]
+    const n = Math.max(1, lastCount)
+    const cols = n === 1 ? 1 : 2
+    const rows = Math.ceil(n / cols)
+    const rowH = n === 1 ? 300 : 200
+    return [width, Math.min(640, 56 + rows * rowH)]
   }
 
   return widget
@@ -205,7 +230,9 @@ app.registerExtension({
       const originalOnExecuted = this.onExecuted
       this.onExecuted = function (message) {
         originalOnExecuted?.apply(this, arguments)
-        this.updateMediaPreview(message?.text)
+        // Pass the whole ui payload so we can read `previews` (and fall back
+        // to `text` for the random-file nodes).
+        this.updateMediaPreview(message)
       }
 
       setTimeout(() => this.setSize(this.computeSize()), 10)

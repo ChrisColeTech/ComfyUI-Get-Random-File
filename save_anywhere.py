@@ -99,6 +99,16 @@ def _as_codec(codec_name: str):
         return codec_name
 
 
+def _preview(kind: str, path: str | Path, info: str) -> dict:
+    """One gallery cell. A LIST of these is the UI contract: ComfyUI flattens
+    `ui[k]` across executions (`[y for x in uis for y in x[k]]`), so a batched
+    IMAGE (one execution, N dicts) and a list-wrapped VIDEO (N executions, one
+    dict each) both land as N cells. Nested tuples inside `ui.text` do not
+    survive that flatten, which is why a batch of 2 only showed the first file."""
+    p = str(path)
+    return {"kind": kind, "path": p, "title": os.path.basename(p), "info": info}
+
+
 def _format_options() -> list[str]:
     try:
         from comfy_api.latest import Types
@@ -199,8 +209,9 @@ class SaveImageToFolder:
             counter += 1
 
         info = f"{w}x{h} • {len(saved)} file{'' if len(saved) == 1 else 's'} • {folder}"
-        return {"ui": {"text": ["image", saved[0], os.path.basename(saved[0]), info,
-                                saved]},
+        previews = [_preview("image", p, info) for p in saved]
+        return {"ui": {"previews": previews,
+                       "text": ["image", saved[0], os.path.basename(saved[0]), info]},
                 "result": (images, "\n".join(saved))}
 
 
@@ -281,7 +292,10 @@ class SaveVideoToFolder:
 
         size_mb = os.path.getsize(target) / 1024 / 1024
         info = (f"{width}x{height} • {size_mb:.1f} MB • {folder}")
-        return {"ui": {"text": ["video", str(target), target.name, info]},
+        # One cell per call. A batch of videos is N executions; ComfyUI concatenates
+        # ui.previews so the widget receives every file, not just the last.
+        return {"ui": {"previews": [_preview("video", target, info)],
+                       "text": ["video", str(target), target.name, info]},
                 "result": (video, str(target))}
 
 
