@@ -80,6 +80,7 @@ def test_image_node():
     assert names == ["ComfyUI_00001_.png", "ComfyUI_00002_.png"], names
     assert out["result"][0] is batch  # passthrough, stock-style
     assert len(out["result"][1].splitlines()) == 2
+    assert out["ui"]["text"][4] == out["result"][1].splitlines()  # gallery: whole batch
 
     # counter never overwrites: second run continues the sequence
     node.save(batch, str(folder), "ComfyUI")

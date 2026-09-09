@@ -199,7 +199,8 @@ class SaveImageToFolder:
             counter += 1
 
         info = f"{w}x{h} • {len(saved)} file{'' if len(saved) == 1 else 's'} • {folder}"
-        return {"ui": {"text": ["image", saved[0], os.path.basename(saved[0]), info]},
+        return {"ui": {"text": ["image", saved[0], os.path.basename(saved[0]), info,
+                                saved]},
                 "result": (images, "\n".join(saved))}
 
 
