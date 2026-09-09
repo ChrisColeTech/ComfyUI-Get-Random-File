@@ -7,14 +7,14 @@ import { addStylesheet } from '../../../scripts/utils.js'
 addStylesheet('css/styles.css', import.meta.url)
 
 // One preview per node: a single DOM widget holding either a playable
-// <video> (VHS-style, streamed from this pack's own token endpoint with
+// <video> (VHS-style, streamed from this pack's own view endpoint with
 // Range support so seeking works) or an <img>. The backend no longer sends
 // ui.images at all, so comfy's built-in canvas preview never draws a second
 // copy - that was the old duplication.
 //
-// ui.text schema from the backend: [kind, token, title, info]
+// ui.text schema from the backend: [kind, path, title, info]
 //   kind  - "video" | "image"
-//   token - preview token for /cctech_random_file/view
+//   path  - absolute file path for /cctech_random_file/view
 //   title - filename
 //   info  - resolution / frames / fps / duration / index line
 
@@ -93,9 +93,9 @@ function createMediaPreviewWidget(node) {
       infoText.style.display = 'none'
       return
     }
-    const [kind, token, title, info] = textInfo
+    const [kind, path, title, info] = textInfo
     const url = api.apiURL(
-      `/cctech_random_file/view?token=${encodeURIComponent(token)}`,
+      `/cctech_random_file/view?path=${encodeURIComponent(path)}`,
     )
     placeholder.style.display = 'none'
     if (kind === 'video') {
@@ -128,6 +128,8 @@ const PREVIEW_NODES = [
   'Get Video File By Index',
   'VideoPathLoader',
   'RandomVideoPathLoader',
+  'SaveImageToFolder',
+  'SaveVideoToFolder',
 ]
 
 app.registerExtension({

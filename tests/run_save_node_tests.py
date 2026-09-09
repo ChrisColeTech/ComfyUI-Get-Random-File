@@ -78,11 +78,10 @@ class Receiver:
         assert self.server.started, "receiver never came up"
         self.port = self.server.servers[0].sockets[0].getsockname()[1]
         self.url = f"http://127.0.0.1:{self.port}"
-        self.cfg.update({"base_dir": str(ART), "token": ""})
-        self.token = self.cfg.new_token()
+        self.cfg.update({"base_dir": str(ART)})
         self._profile("portraits", "Portraits", "{model}_{seed}_{timestamp}")
         save_remote.CONFIG_PATH = DATA / "receiver_config.json"
-        self.config({"name": "Test PC", "url": self.url, "token": self.token,
+        self.config({"name": "Test PC", "url": self.url,
                      "timeout": 15, "verify_tls": True, "enabled": True})
 
     def _profile(self, key: str, dest: str, rule: str) -> None:
@@ -90,8 +89,7 @@ class Receiver:
         req = urllib.request.Request(f"{self.url}/api/v1/profiles", method="POST",
                                      data=json.dumps({"save_key": key, "destination": dest,
                                                       "filename_rule": rule}).encode(),
-                                     headers={"Authorization": f"Bearer {self.token}",
-                                              "Content-Type": "application/json"})
+                                     headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req) as r:
             assert r.status == 200
 
@@ -102,7 +100,7 @@ class Receiver:
 
     def reset(self) -> None:
         """Every test starts from the good config — order-independent."""
-        self.config({"name": "Test PC", "url": self.url, "token": self.token,
+        self.config({"name": "Test PC", "url": self.url,
                      "timeout": 15, "verify_tls": True, "enabled": True})
 
     def stop(self) -> None:
@@ -149,22 +147,8 @@ def test_missing_file_is_a_clear_error(rx: Receiver):
     raise AssertionError("missing file did not raise")
 
 
-def test_bad_token_is_actionable(rx: Receiver):
-    rx.config({"name": "Test PC", "url": rx.url, "token": "wrong",
-               "timeout": 15, "verify_tls": True, "enabled": True})
-    try:
-        save_remote.SaveVideoToPC().save(__file__, "Test PC", "portraits")
-    except RuntimeError as e:
-        assert "auth.invalid_token" in str(e), e
-        return
-    finally:
-        rx.config({"name": "Test PC", "url": rx.url, "token": rx.token,
-                   "timeout": 15, "verify_tls": True, "enabled": True})
-    raise AssertionError("bad token did not raise")
-
-
 def test_unreachable_receiver_names_the_profile(rx: Receiver):
-    rx.config({"name": "Ghost PC", "url": "http://127.0.0.1:9", "token": "t",
+    rx.config({"name": "Ghost PC", "url": "http://127.0.0.1:9",
                "timeout": 2, "verify_tls": True, "enabled": True})
     try:
         save_remote.SaveVideoToPC().save(__file__, "Ghost PC", "portraits")

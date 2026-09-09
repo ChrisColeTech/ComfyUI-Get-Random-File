@@ -25,11 +25,10 @@ CATEGORY = "🤖 CCTech/Files"
 HERE = Path(__file__).resolve().parent
 CONFIG_PATH = HERE / "receiver_config.json"
 
-# The template written on first import — token empty until the user fills it
-# from the receiver's Dashboard token block (docs/03 § Node Config).
+# The template written on first import.
 CONFIG_TEMPLATE = {
     "receivers": [
-        {"name": "Home PC", "url": "http://100.81.23.51:8790", "token": "",
+        {"name": "Home PC", "url": "http://100.81.23.51:8790",
          "timeout": 120, "verify_tls": True, "enabled": True},
     ],
     "default_receiver": "Home PC",
@@ -44,8 +43,7 @@ CONFIG_TEMPLATE = {
 def load_config() -> dict:
     if not CONFIG_PATH.is_file():
         CONFIG_PATH.write_text(json.dumps(CONFIG_TEMPLATE, indent=2), encoding="utf-8")
-        print(f"[CCTech Save] created receiver config template: {CONFIG_PATH} — "
-              "fill in the token (the receiver UI generates it)")
+        print(f"[CCTech Save] created receiver config template: {CONFIG_PATH}")
     try:
         cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except ValueError:
@@ -90,8 +88,7 @@ def _post(receiver: dict, node: str, data: dict, files: dict, stream: bool = Fal
     started = time.monotonic()
     try:
         r = requests.post(url, data=data, files=files, timeout=timeout,
-                          verify=receiver.get("verify_tls", True), stream=stream,
-                          headers={"Authorization": f"Bearer {receiver.get('token', '')}"})
+                          verify=receiver.get("verify_tls", True), stream=stream)
     except requests.RequestException as e:
         raise RuntimeError(f"{node}: receiver '{receiver['name']}' at {url} unreachable ({e})") from e
     finally:
@@ -310,11 +307,7 @@ def register_config_routes() -> None:
 
     @routes.get("/cctech_save/config")
     async def _get_config(request):
-        cfg = load_config()
-        for r in cfg.get("receivers", []):
-            if r.get("token"):
-                r["token"] = "••••" + r["token"][-4:]
-        return web.json_response(cfg)
+        return web.json_response(load_config())
 
     @routes.post("/cctech_save/config")
     async def _post_config(request):

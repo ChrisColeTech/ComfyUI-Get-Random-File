@@ -1,5 +1,5 @@
 # test scratch
-tests/_run_art/
-tests/_run_data/
-tests/__pycache__/
+_run_art/
+_run_data/
+_anywhere_art/
 __pycache__/

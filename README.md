@@ -16,6 +16,12 @@ Welcome to **ComfyUI-Get-Random-File**! 🚀 This awesome tool brings a touch of
 - 🎲 **Random Image Path**  
   Picks a random IMAGE file from a directory and provides you with the IMAGE and its filepath as a STRING. 
 
+- ⚡ **Save Image to Folder**  
+  Saves images to ANY folder on your computer (not just ComfyUI's output directory). Creates the folder if missing, never overwrites (stock-style `_00001_` counter), embeds the workflow metadata in PNGs, and supports the stock `%width%`/`%date`-style prefix variables. 
+
+- ⚡ **Save Video to Folder**  
+  Saves a VIDEO input to ANY folder on your computer using ComfyUI's own writer — streams are copied when compatible and re-encoded only when the format/codec/CRF require it. 
+
 ## 📝 Prompt Metadata Outputs
 
 Both image nodes (**Random Image Path** and **Get Image File By Index**) also output `positive_prompt` and `negative_prompt` STRINGs extracted from the picked image's embedded ComfyUI workflow metadata — so you can wire the prompts that originally generated an image straight into whatever consumes it. Works with titled prompt nodes, sampler/guider link traversal (including parallel chains, Anything-Everywhere-injected graphs, and combined prep nodes like this family's own img2img nodes that carry `prompt` widgets), CLIPTextEncode/CLIPTextEncodeFlux, the core `TextEncode*` encoders (QwenImageEdit, ZImageOmni, SDXL, SD3, HunyuanDiT, ...), text concatenation and wildcard nodes. Images without embedded prompts (or non-PNG files) simply return empty strings.

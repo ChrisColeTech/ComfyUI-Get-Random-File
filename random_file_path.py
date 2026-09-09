@@ -5,8 +5,6 @@ from PIL import Image, ImageOps
 import numpy as np
 import folder_paths
 
-import hashlib
-
 from comfy_api.input_impl import VideoFromFile
 
 from .prompt_metadata import prompts_from_image_file
@@ -108,24 +106,10 @@ def _pick(files, unique_id, randomize):
 # ── Preview serving ─────────────────────────────────────────────────────────
 # The picked file is streamed to the node's single DOM preview widget (a real
 # playable <video> for videos, an <img> for images - the VHS pattern) through
-# this pack's own /cctech_random_file/view endpoint. Only files a node
-# actually picked are servable: each pick registers the path under a random
-# token, and the endpoint refuses anything else - it can never be used to
-# read arbitrary paths. No temp-file copies, and nothing is sent as
+# this pack's own /cctech_random_file/view endpoint, which serves any
+# absolute path the node emits. No temp-file copies, and nothing is sent as
 # ui.images (that made comfy draw a second copy of the preview on the node
 # canvas on top of the DOM widget - the reported duplication).
-
-_PREVIEW_REGISTRY = {}
-_PREVIEW_REGISTRY_LIMIT = 256
-
-
-def _register_preview(path):
-    token = hashlib.sha256(os.urandom(16) + path.encode()).hexdigest()[:24]
-    _PREVIEW_REGISTRY[token] = path
-    while len(_PREVIEW_REGISTRY) > _PREVIEW_REGISTRY_LIMIT:
-        _PREVIEW_REGISTRY.pop(next(iter(_PREVIEW_REGISTRY)))
-    return token
-
 
 def register_preview_route():
     """Mount /cctech_random_file/view on comfy's server (called from
@@ -138,9 +122,8 @@ def register_preview_route():
 
     @server.PromptServer.instance.routes.get("/cctech_random_file/view")
     async def _view_random_file(request):
-        token = request.query.get("token", "")
-        path = _PREVIEW_REGISTRY.get(token)
-        if path is None or not os.path.isfile(path):
+        path = request.query.get("path", "")
+        if not path or not os.path.isfile(path):
             return web.Response(status=404)
         # FileResponse handles Range requests, so <video> seeking works.
         return web.FileResponse(path)
@@ -220,11 +203,10 @@ class RandomImagePathNode:
         path = _pick(files, unique_id, randomize)
         image_tensor, mask = _load_image_outputs(path)
         positive_prompt, negative_prompt = prompts_from_image_file(path)
-        token = _register_preview(path)
         h, w = image_tensor.shape[1], image_tensor.shape[2]
         return {
             "ui": {
-                "text": ["image", token, os.path.basename(path), f"{w}x{h}"],
+                "text": ["image", path, os.path.basename(path), f"{w}x{h}"],
             },
             "result": (image_tensor, path, mask, positive_prompt, negative_prompt),
         }
@@ -286,12 +268,11 @@ class GetImageFileByIndexNode:
         path = files[result]
         image_tensor, mask = _load_image_outputs(path)
         positive_prompt, negative_prompt = prompts_from_image_file(path)
-        token = _register_preview(path)
         h, w = image_tensor.shape[1], image_tensor.shape[2]
         info = f"{w}x{h} | Index: {result} / {len(files) - 1}"
         return {
             "ui": {
-                "text": ["image", token, os.path.basename(path), info],
+                "text": ["image", path, os.path.basename(path), info],
             },
             "result": (image_tensor, path, float(counter), int(counter), mask,
                        positive_prompt, negative_prompt),
@@ -343,7 +324,6 @@ class RandomVideoPathNode:
         path = _pick(files, unique_id, randomize)
         video, images, audio, fps, frame_count, w, h = _load_video_outputs(
             path, split)
-        token = _register_preview(path)
 
         duration = frame_count / fps if fps > 0 else 0
         video_info_text = (f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • "
@@ -353,7 +333,7 @@ class RandomVideoPathNode:
                            + ("" if split else " • components bypassed"))
         return {
             "ui": {
-                "text": ["video", token, os.path.basename(path), video_info_text],
+                "text": ["video", path, os.path.basename(path), video_info_text],
             },
             "result": (images, path, video, audio, fps, frame_count),
         }
@@ -408,7 +388,6 @@ class GetVideoFileByIndexNode:
         path = files[result]
         video, images, audio, fps, frame_count, w, h = _load_video_outputs(
             path, split)
-        token = _register_preview(path)
 
         duration = frame_count / fps if fps > 0 else 0
         video_info_text = (f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • "
@@ -418,7 +397,7 @@ class GetVideoFileByIndexNode:
                            + ("" if split else " • components bypassed"))
         return {
             "ui": {
-                "text": ["video", token, os.path.basename(path), video_info_text],
+                "text": ["video", path, os.path.basename(path), video_info_text],
             },
             "result": (images, path, float(counter), int(counter),
                        video, audio, fps, frame_count),
@@ -426,10 +405,9 @@ class GetVideoFileByIndexNode:
 
 
 def _video_result(path, split, extra_info=""):
-    """Shared tail for the path loaders: decode, register the preview, and
-    build the ui/result payload in the same shape as the other video nodes."""
+    """Shared tail for the path loaders: decode and build the ui/result
+    payload in the same shape as the other video nodes."""
     video, images, audio, fps, frame_count, w, h = _load_video_outputs(path, split)
-    token = _register_preview(path)
     duration = frame_count / fps if fps > 0 else 0
     video_info_text = (f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • "
                        f"{duration:.2f}s" + extra_info
@@ -437,7 +415,7 @@ def _video_result(path, split, extra_info=""):
                        + ("" if split else " • components bypassed"))
     return {
         "ui": {
-            "text": ["video", token, os.path.basename(path), video_info_text],
+            "text": ["video", path, os.path.basename(path), video_info_text],
         },
         "result": (images, path, video, audio, fps, frame_count),
     }
@@ -475,12 +453,11 @@ class VideoPathLoader:
             raise FileNotFoundError(f"Video file not found: {video_path}")
         video = VideoFromFile(video_path)
         fps, frame_count, w, h = _probe_video_meta(video_path)
-        token = _register_preview(video_path)
         duration = frame_count / fps if fps > 0 else 0
         info = f"{w}x{h} • {frame_count} frames • {fps:.2f} fps • {duration:.2f}s"
         return {
             "ui": {
-                "text": ["video", token, os.path.basename(video_path), info],
+                "text": ["video", video_path, os.path.basename(video_path), info],
             },
             "result": (video,),
         }
