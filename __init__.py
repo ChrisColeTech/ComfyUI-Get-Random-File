@@ -1,14 +1,12 @@
 from .random_file_path import (NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS,
                                register_preview_route)
 from .save_remote import (NODE_CLASS_MAPPINGS as _SAVE_MAPPINGS,
-                          NODE_DISPLAY_NAME_MAPPINGS as _SAVE_DISPLAY,
-                          register_config_routes)
+                          NODE_DISPLAY_NAME_MAPPINGS as _SAVE_DISPLAY)
 from .save_anywhere import (NODE_CLASS_MAPPINGS as _ANYWHERE_MAPPINGS,
                             NODE_DISPLAY_NAME_MAPPINGS as _ANYWHERE_DISPLAY)
 import random
 
 register_preview_route()
-register_config_routes()
 NODE_CLASS_MAPPINGS.update(_SAVE_MAPPINGS)
 NODE_DISPLAY_NAME_MAPPINGS.update(_SAVE_DISPLAY)
 NODE_CLASS_MAPPINGS.update(_ANYWHERE_MAPPINGS)

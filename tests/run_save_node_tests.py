@@ -3,6 +3,11 @@
 §Verification, R2): real uvicorn on an ephemeral port, real HTTP from
 save_remote — the nodes' contract is the wire, so the test rides it.
 
+Covers the 2026-09-10 node rulings:
+  - config on the node (receiver_url/subfolder; no save_key, no config file)
+  - native-parity PNG metadata embedding (prompt + workflow, nothing scrubbed)
+  - FAIL LOUD ONLY: no retries, no spool, nothing written on the pod
+
 Run with giga-server's backend venv:
 
   & D:\Projects\giga-server\src\backend\.venv\Scripts\python.exe tests\run_save_node_tests.py
@@ -17,10 +22,10 @@ import os
 import sys
 import threading
 import time
-import traceback
 from pathlib import Path
 
 import numpy as np
+import requests
 
 HERE = Path(__file__).resolve().parent
 NODES = HERE.parent
@@ -37,7 +42,7 @@ from receiver.config import Config  # noqa: E402
 
 
 class _FakeTensor:
-    """The slice of torch's surface SaveImageToPC actually uses."""
+    """The slice of torch's surface SaveImageToRemote actually uses."""
 
     def __init__(self, arr):
         self._arr = np.asarray(arr, dtype=np.float32)
@@ -60,7 +65,7 @@ class _FakeTensor:
 
 
 class Receiver:
-    """uvicorn on an ephemeral port + a node config pointing at it."""
+    """uvicorn on an ephemeral port; nodes take its URL directly."""
 
     def __init__(self) -> None:
         import uvicorn
@@ -79,103 +84,125 @@ class Receiver:
         self.port = self.server.servers[0].sockets[0].getsockname()[1]
         self.url = f"http://127.0.0.1:{self.port}"
         self.cfg.update({"base_dir": str(ART)})
-        self._profile("portraits", "Portraits", "{model}_{seed}_{timestamp}")
-        save_remote.CONFIG_PATH = DATA / "receiver_config.json"
-        self.config({"name": "Test PC", "url": self.url,
-                     "timeout": 15, "verify_tls": True, "enabled": True})
-
-    def _profile(self, key: str, dest: str, rule: str) -> None:
-        import urllib.request
-        req = urllib.request.Request(f"{self.url}/api/v1/profiles", method="POST",
-                                     data=json.dumps({"save_key": key, "destination": dest,
-                                                      "filename_rule": rule}).encode(),
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req) as r:
-            assert r.status == 200
-
-    def config(self, receiver: dict) -> None:
-        save_remote.CONFIG_PATH.write_text(json.dumps(
-            {"receivers": [receiver], "default_receiver": receiver["name"],
-             "default_save_key": "portraits"}), encoding="utf-8")
-
-    def reset(self) -> None:
-        """Every test starts from the good config — order-independent."""
-        self.config({"name": "Test PC", "url": self.url,
-                     "timeout": 15, "verify_tls": True, "enabled": True})
 
     def stop(self) -> None:
         self.server.should_exit = True
         time.sleep(0.2)
 
 
+def _expect_runtime_error(fn, *fragments) -> str:
+    try:
+        fn()
+    except RuntimeError as e:
+        for fragment in fragments:
+            assert fragment.lower() in str(e).lower(), f"{fragment!r} not in: {e}"
+        return str(e)
+    raise AssertionError("expected failure did not raise")
+
+
 # ---- the checks ---------------------------------------------------------------
 
 def test_image_node_saves_batch_with_metadata(rx: Receiver):
-    node = save_remote.SaveImageToPC()
+    node = save_remote.SaveImageToRemote()
     batch = np.random.default_rng(3).uniform(0, 1, (2, 8, 10, 3))
-    out = node.save(_FakeTensor(batch), "Test PC", "portraits", "shot_", "flux2",
+    out = node.save(_FakeTensor(batch), rx.url, "portraits", "shot_", "flux2",
                     "studio", "a cat", "blurry", 845, format="png")
     paths = out["result"][0].splitlines()
     assert len(paths) == 2, paths
     for p in paths:
         saved = Path(p)
-        assert saved.is_file() and saved.name.startswith("flux2_845_") and saved.suffix == ".png"
-        sidecar = json.loads(saved.with_suffix(".json").read_text(encoding="utf-8"))
-        assert sidecar["prompt"] == "a cat" and str(sidecar["width"]) == "10"
+        assert saved.is_file() and saved.name.startswith("shot_") and saved.suffix == ".png", p
+        # no sidecar, ever — metadata rides inside the file (owner 2026-09-10)
+        assert not saved.with_suffix(".json").exists(), p
     assert len(out["ui"]["text"]) == 2
+    hist = requests.get(f"{rx.url}/api/v1/uploads?limit=2").json()["uploads"]
+    assert all(row["status"] == "success" for row in hist)
+
+
+def test_image_node_embeds_prompt_and_workflow(rx: Receiver):
+    """Native-parity embedding: the API prompt + the UI workflow ride in the
+    PNG's text chunks, nothing scrubbed (owner 2026-09-10)."""
+    from PIL import Image
+    graph = {"3": {"class_type": "SaveImageToRemote",
+                   "inputs": {"receiver_url": save_remote.DEFAULT_RECEIVER_URL,
+                              "subfolder": "portraits"}}}
+    workflow = {"nodes": [{"id": 3, "widgets_values": ["https://x.trycloudflare.com"]}]}
+    node = save_remote.SaveImageToRemote()
+    out = node.save(_FakeTensor(np.zeros((1, 4, 4, 3))), rx.url, "", "", "", "", "", "", 0,
+                    format="png", prompt=graph, extra_pnginfo={"workflow": workflow})
+    saved = Image.open(out["result"][0])
+    assert json.loads(saved.text["prompt"]) == graph
+    assert json.loads(saved.text["workflow"]) == workflow  # host value rides along, unscrubbed
+    plain = node.save(_FakeTensor(np.zeros((1, 4, 4, 3))), rx.url, "", "", "", "", "", "", 0,
+                      format="png")
+    assert "prompt" not in Image.open(plain["result"][0]).text  # none passed -> none embedded
 
 
 def test_video_node_streams_and_deletes_after_success(rx: Receiver, tmp: Path):
     src = tmp / "wan_00213.mp4"
     payload = b"\x00\x00\x00\x18ftypmp42" + os.urandom(2048)
     src.write_bytes(payload)
-    out = save_remote.SaveVideoToPC().save(str(src), "Test PC", "portraits",
-                                           model_name="wan", workflow_name="video",
-                                           seed=213, delete_after_success=True)
+    out = save_remote.SaveVideoToRemote().save(str(src), rx.url, "portraits",
+                                               model_name="wan", workflow_name="video",
+                                               seed=213, delete_after_success=True)
     saved = Path(out["result"][0])
     assert saved.is_file() and saved.read_bytes() == payload
     assert not src.exists(), "source deleted only AFTER confirmed success"
     assert "source deleted" in out["ui"]["text"][0][3]
 
 
+def test_failure_is_loud_and_writes_nothing(rx: Receiver, tmp: Path):
+    """FAIL LOUD ONLY (owner 2026-09-10): one attempt, immediate error naming
+    the URL; no spool, no retry, nothing written here."""
+    src = tmp / "wan_keep.mp4"
+    src.write_bytes(b"\x00\x00\x00\x18ftypmp42" + os.urandom(512))
+    _expect_runtime_error(
+        lambda: save_remote.SaveVideoToRemote().save(str(src), "http://127.0.0.1:9", "",
+                                                     timeout=2),
+        "http://127.0.0.1:9", "unreachable")
+    assert src.exists(), "the pod file is never touched by a failed delivery"
+
+
 def test_missing_file_is_a_clear_error(rx: Receiver):
-    try:
-        save_remote.SaveVideoToPC().save(r"X:\nope.mp4", "Test PC", "portraits")
-    except RuntimeError as e:
-        assert "file not found" in str(e)
-        return
-    raise AssertionError("missing file did not raise")
-
-
-def test_unreachable_receiver_names_the_profile(rx: Receiver):
-    rx.config({"name": "Ghost PC", "url": "http://127.0.0.1:9",
-               "timeout": 2, "verify_tls": True, "enabled": True})
-    try:
-        save_remote.SaveVideoToPC().save(__file__, "Ghost PC", "portraits")
-    except RuntimeError as e:
-        assert "Ghost PC" in str(e) and "unreachable" in str(e)
-        return
-    raise AssertionError("unreachable receiver did not raise")
+    _expect_runtime_error(
+        lambda: save_remote.SaveVideoToRemote().save(r"X:\nope.mp4", rx.url, ""),
+        "file not found")
 
 
 def test_extra_metadata_must_be_json(rx: Receiver):
-    try:
-        save_remote.SaveImageToPC().save(_FakeTensor(np.zeros((1, 4, 4, 3))), "Test PC",
-                                         "portraits", "", "", "", "", "", 0,
-                                         extra_metadata="{oops")
-    except RuntimeError as e:
-        assert "not valid JSON" in str(e)
-        return
-    raise AssertionError("bad extra_metadata did not raise")
+    _expect_runtime_error(
+        lambda: save_remote.SaveImageToRemote().save(
+            _FakeTensor(np.zeros((1, 4, 4, 3))), rx.url, "", "", "", "", "", "", 0,
+            extra_metadata="{oops"),
+        "not valid JSON")
 
 
-def test_receiver_names_default_first(rx: Receiver):
-    assert save_remote.receiver_names()[0] == "Test PC"
+def test_config_lives_on_the_node_not_on_disk(rx: Receiver):
+    """Widgets carry the config; defaults point at the SSH route; no config file exists."""
+    for cls in (save_remote.SaveImageToRemote, save_remote.SaveVideoToRemote):
+        spec = cls.INPUT_TYPES()["required"]
+        assert "receiver_profile" not in spec and "save_key" not in spec
+        assert spec["receiver_url"][1]["default"] == save_remote.DEFAULT_RECEIVER_URL
+    assert save_remote.DEFAULT_RECEIVER_URL == "http://127.0.0.1:8790"
+    assert not (NODES / "receiver_config.json").exists(), "no sidecar config may exist"
+    for gone in ("RETRY_ATTEMPTS", "SPOOL_DIR", "_spool_file", "TRANSIENT_ERRORS"):
+        assert not hasattr(save_remote, gone), f"fail-loud-only: {gone} must not exist"
+
+
+def test_bad_url_is_a_loud_input_error(rx: Receiver):
+    for bad in ("", "localhost:8790", "ftp://x", "runpod"):
+        try:
+            save_remote.check_receiver_url(bad)
+        except RuntimeError as e:
+            assert "receiver_url" in str(e) and save_remote.DEFAULT_RECEIVER_URL in str(e)
+            continue
+        raise AssertionError(f"bad url accepted: {bad!r}")
 
 
 # ---- runner -------------------------------------------------------------------
 
 def main() -> int:
+    import json  # noqa: F401  (used by the embedding test above)
     import shutil
     shutil.rmtree(DATA, ignore_errors=True)
     shutil.rmtree(ART, ignore_errors=True)
@@ -186,13 +213,13 @@ def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
     for t in tests:
-        rx.reset()
         try:
             t(rx, tmp) if t.__code__.co_argcount > 1 else t(rx)
             print(f"  PASS {t.__name__}")
         except Exception:
             failed += 1
             print(f"  FAIL {t.__name__}")
+            import traceback
             traceback.print_exc()
     rx.stop()
     print(f"\n{len(tests) - failed}/{len(tests)} passed")
