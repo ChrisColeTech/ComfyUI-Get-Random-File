@@ -1,15 +1,13 @@
 import math
-
-
 CATEGORY = "🤖 CCTech/Files"
 
 def _clean_text(text: str) -> str:
     """
-    Remove invisible formatting that should not affect the estimate:
-    - trailing spaces/tabs on each line
-    - leading/trailing whitespace around the whole block
+    Normalize text before calculating duration:
+    - remove trailing spaces/tabs from each line
+    - remove leading/trailing whitespace around the entire block
 
-    Internal spaces and line breaks are preserved and still count.
+    Internal spaces and line breaks are preserved.
     """
     if not text:
         return ""
@@ -20,16 +18,12 @@ def _clean_text(text: str) -> str:
 
 class TextToFrames:
     """
-    Estimate the number of video frames needed for a block of spoken text.
+    Estimate video frames needed for spoken text.
 
     Default calibration:
         156 characters = 9 seconds
         25 FPS
         9 seconds * 25 FPS = 225 frames
-
-    This gives:
-        17.333333 characters / second
-        1.4423077 frames / character at 25 FPS
     """
 
     @classmethod
@@ -74,8 +68,8 @@ class TextToFrames:
             }
         }
 
-    RETURN_TYPES = ("INT", "FLOAT", "INT")
-    RETURN_NAMES = ("frames", "seconds", "characters")
+    RETURN_TYPES = ("INT", "FLOAT", "INT", "STRING")
+    RETURN_NAMES = ("frames", "seconds", "characters", "text")
     FUNCTION = "calculate"
     CATEGORY = CATEGORY
 
@@ -90,12 +84,12 @@ class TextToFrames:
         character_count = len(cleaned_text)
 
         if character_count == 0:
-            return (0, 0.0, 0)
+            return (0, 0.0, 0, "")
 
         speech_seconds = character_count / float(chars_per_second)
         total_seconds = speech_seconds + float(padding_seconds)
 
-        # Always round UP so the generated video is never shorter
+        # Always round UP so generated video is not shorter
         # than the estimated speech duration.
         frames = math.ceil(total_seconds * int(fps))
 
@@ -103,8 +97,8 @@ class TextToFrames:
             int(frames),
             round(total_seconds, 3),
             int(character_count),
+            cleaned_text,
         )
-
 
 NODE_CLASS_MAPPINGS = {
     "TextToFrames": TextToFrames,
