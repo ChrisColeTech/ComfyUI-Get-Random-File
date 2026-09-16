@@ -1,6 +1,8 @@
 import math
 
 
+CATEGORY = "🤖 CCTech/Files"
+
 def _clean_text(text: str) -> str:
     """
     Remove invisible formatting that should not affect the estimate:
@@ -75,7 +77,7 @@ class TextToFrames:
     RETURN_TYPES = ("INT", "FLOAT", "INT")
     RETURN_NAMES = ("frames", "seconds", "characters")
     FUNCTION = "calculate"
-    CATEGORY = "utils/text"
+    CATEGORY = CATEGORY
 
     def calculate(
         self,
