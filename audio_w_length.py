@@ -256,7 +256,7 @@ class PreviewAudioWithLength:
     RETURN_NAMES = ("audio", "length")
     FUNCTION = "preview"
     OUTPUT_NODE = True
-    CATEGORY = "audio"
+    CATEGORY = CATEGORY
 
     def preview(self, audio):
         length = _audio_length_seconds(audio)
@@ -315,7 +315,7 @@ class SaveAudioWithLength:
     RETURN_NAMES = ("audio", "length")
     FUNCTION = "save"
     OUTPUT_NODE = True
-    CATEGORY = "audio"
+    CATEGORY = CATEGORY
 
     def save(
         self,
