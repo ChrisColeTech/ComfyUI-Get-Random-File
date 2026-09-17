@@ -6,6 +6,8 @@ from .save_anywhere import (NODE_CLASS_MAPPINGS as _ANYWHERE_MAPPINGS,
                             NODE_DISPLAY_NAME_MAPPINGS as _ANYWHERE_DISPLAY)
 from .text_to_frames import (NODE_CLASS_MAPPINGS as _FRAMES_MAPPINGS,
                           NODE_DISPLAY_NAME_MAPPINGS as _FRAMES_DISPLAY)
+from .audio_w_length import (NODE_CLASS_MAPPINGS as _AUDIO_MAPPINGS,
+                          NODE_DISPLAY_NAME_MAPPINGS as _AUDIO_DISPLAY)
 import random
 
 register_preview_route()
@@ -15,6 +17,8 @@ NODE_CLASS_MAPPINGS.update(_ANYWHERE_MAPPINGS)
 NODE_DISPLAY_NAME_MAPPINGS.update(_ANYWHERE_DISPLAY)
 NODE_CLASS_MAPPINGS.update(_FRAMES_MAPPINGS)
 NODE_DISPLAY_NAME_MAPPINGS.update(_FRAMES_DISPLAY)
+NODE_CLASS_MAPPINGS.update(_AUDIO_MAPPINGS)
+NODE_DISPLAY_NAME_MAPPINGS.update(_AUDIO_DISPLAY)
 
 tech_rambling = [
     "Zap zap zoom!", "Sproing-a-ling!", "Flux capacitor charged!", "Circuit party started!",
